@@ -33,6 +33,7 @@ pub mod errors;
 pub mod storage;
 pub mod types;
 
+#[contract]
 pub struct FeeDistributorContract;
 
 #[contractimpl]

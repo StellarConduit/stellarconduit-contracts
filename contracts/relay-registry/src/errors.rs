@@ -21,4 +21,17 @@
 
 use soroban_sdk::contracterror;
 
-// implementation tracked in GitHub issue
+#[contracterror]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum ContractError {
+    AlreadyRegistered = 1,
+    NotRegistered = 2,
+    InsufficientStake = 3,
+    NodeNotActive = 4,
+    NodeSlashed = 5,
+    StakeLocked = 6,
+    UnauthorizedSlash = 7,
+    InvalidMetadata = 8,
+    Overflow = 9,
+}
