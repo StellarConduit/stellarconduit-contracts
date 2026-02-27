@@ -23,4 +23,37 @@
 
 use soroban_sdk::{contracttype, Address, String};
 
-// implementation tracked in GitHub issue
+#[contracttype]
+#[derive(Clone)]
+pub struct RelayNode {
+    pub address: Address,
+    pub stake: i128,
+    pub status: NodeStatus,
+    pub metadata: NodeMetadata,
+    pub registered_at: u64,
+    pub last_active: u64,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct NodeMetadata {
+    pub region: String,
+    pub capacity: u32,
+    pub uptime_commitment: u32,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub enum NodeStatus {
+    Active,
+    Inactive,
+    Slashed,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct StakeEntry {
+    pub node: Address,
+    pub amount: i128,
+    pub unlock_ledger: u32,
+}
