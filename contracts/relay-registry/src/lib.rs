@@ -27,72 +27,149 @@
 
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, Address, Env};
+use soroban_sdk::{contract, contractimpl, Address, Env, String};
 
 pub mod errors;
 pub mod storage;
 pub mod types;
 
 use crate::errors::ContractError;
-use crate::types::{NodeStatus, StakeEntry};
+use crate::types::{NodeMetadata, NodeStatus, RelayNode};
 
 #[contract]
 pub struct RelayRegistryContract;
 
 #[contractimpl]
 impl RelayRegistryContract {
-    /// Initiates unstaking for a registered relay node and records a lock period.
-    ///
-    /// # Parameters
-    /// - `env`: Soroban execution environment.
-    /// - `node_address`: Address of the relay node requesting unstake.
-    /// - `amount`: Amount of stake to unlock.
-    ///
-    /// # Errors
-    /// - [`ContractError::NotRegistered`] if the node is not registered.
-    /// - [`ContractError::NodeSlashed`] if the node has been slashed.
-    /// - [`ContractError::InsufficientStake`] if `amount <= 0` or exceeds current stake.
-    /// - [`ContractError::Overflow`] if arithmetic overflows/underflows.
-    pub fn unstake(env: Env, node_address: Address, amount: i128) -> Result<(), ContractError> {
+    pub fn register(
+        env: Env,
+        node_address: Address,
+        metadata: NodeMetadata,
+    ) -> Result<RelayNode, ContractError> {
         node_address.require_auth();
 
-        let mut node =
-            storage::get_node(&env, &node_address).ok_or(ContractError::NotRegistered)?;
-
-        if node.status == NodeStatus::Slashed {
-            return Err(ContractError::NodeSlashed);
+        if storage::get_node(&env, &node_address).is_some() {
+            return Err(ContractError::AlreadyRegistered);
+        }
+        if !Self::is_valid_metadata(&metadata) {
+            return Err(ContractError::InvalidMetadata);
         }
 
-        if amount <= 0 || amount > node.stake {
+        let node = RelayNode {
+            address: node_address.clone(),
+            stake: storage::get_min_stake(&env),
+            status: NodeStatus::Active,
+            metadata,
+            registered_at: env.ledger().timestamp(),
+            last_active: env.ledger().timestamp(),
+        };
+
+        storage::set_node(&env, &node_address, &node);
+        storage::increment_node_count(&env);
+        Ok(node)
+    }
+
+    pub fn stake(
+        env: Env,
+        node_address: Address,
+        amount: i128,
+    ) -> Result<RelayNode, ContractError> {
+        node_address.require_auth();
+        if amount <= 0 {
             return Err(ContractError::InsufficientStake);
         }
 
-        let lock_period = storage::get_stake_lock_period(&env);
-        let unlock_ledger = env
-            .ledger()
-            .sequence()
-            .checked_add(lock_period)
-            .ok_or(ContractError::Overflow)?;
-        let entry = StakeEntry {
-            address: node_address.clone(),
-            unlocks_at: unlock_ledger as u64,
-        };
-        storage::set_pending_unstake(&env, &node_address, &entry);
+        let mut node = storage::get_node(&env, &node_address).ok_or(ContractError::NotRegistered)?;
+        if matches!(node.status, NodeStatus::Slashed) {
+            return Err(ContractError::NodeSlashed);
+        }
 
-        let new_stake = node
+        node.stake = node
+            .stake
+            .checked_add(amount)
+            .ok_or(ContractError::Overflow)?;
+
+        if node.stake < storage::get_min_stake(&env) {
+            return Err(ContractError::InsufficientStake);
+        }
+
+        node.status = NodeStatus::Active;
+        node.last_active = env.ledger().timestamp();
+        storage::set_node(&env, &node_address, &node);
+        Ok(node)
+    }
+
+    pub fn unstake(
+        env: Env,
+        node_address: Address,
+        amount: i128,
+    ) -> Result<RelayNode, ContractError> {
+        node_address.require_auth();
+        if amount <= 0 {
+            return Err(ContractError::InsufficientStake);
+        }
+
+        let mut node = storage::get_node(&env, &node_address).ok_or(ContractError::NotRegistered)?;
+        if matches!(node.status, NodeStatus::Slashed) {
+            return Err(ContractError::NodeSlashed);
+        }
+        if !matches!(node.status, NodeStatus::Active) {
+            return Err(ContractError::NodeNotActive);
+        }
+
+        let unlock_after = node
+            .registered_at
+            .checked_add(storage::get_stake_lock_period(&env) as u64)
+            .ok_or(ContractError::Overflow)?;
+        if env.ledger().timestamp() < unlock_after {
+            return Err(ContractError::StakeLocked);
+        }
+        if amount > node.stake {
+            return Err(ContractError::InsufficientStake);
+        }
+
+        node.stake = node
             .stake
             .checked_sub(amount)
             .ok_or(ContractError::Overflow)?;
 
-        let min_stake = storage::get_min_stake(&env);
-        if new_stake < min_stake {
+        if node.stake < storage::get_min_stake(&env) {
             node.status = NodeStatus::Inactive;
         }
-
-        node.stake = new_stake;
+        node.last_active = env.ledger().timestamp();
         storage::set_node(&env, &node_address, &node);
+        Ok(node)
+    }
 
-        // TODO: finalize_unstake()
-        Ok(())
+    pub fn slash(
+        env: Env,
+        node_address: Address,
+        _reason: String,
+    ) -> Result<RelayNode, ContractError> {
+        let mut node = storage::get_node(&env, &node_address).ok_or(ContractError::NotRegistered)?;
+        if matches!(node.status, NodeStatus::Slashed) {
+            return Err(ContractError::NodeSlashed);
+        }
+
+        node.stake = 0;
+        node.status = NodeStatus::Slashed;
+        node.last_active = env.ledger().timestamp();
+        storage::set_node(&env, &node_address, &node);
+        Ok(node)
+    }
+
+    pub fn get_node(env: Env, address: Address) -> Result<RelayNode, ContractError> {
+        storage::get_node(&env, &address).ok_or(ContractError::NotRegistered)
+    }
+
+    pub fn is_active(env: Env, address: Address) -> bool {
+        matches!(
+            storage::get_node(&env, &address).map(|n| n.status),
+            Some(NodeStatus::Active)
+        )
+    }
+
+    fn is_valid_metadata(metadata: &NodeMetadata) -> bool {
+        metadata.capacity > 0 && metadata.uptime_commitment <= 100 && metadata.region.len() > 0
     }
 }
