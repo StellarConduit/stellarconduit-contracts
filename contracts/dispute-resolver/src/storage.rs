@@ -92,6 +92,11 @@ pub fn set_resolution_window(env: &Env, window_ledgers: u32) {
         .set(&DataKey::ResolutionWindow, &window_ledgers);
 }
 
+/// Check if the admin address is set.
+pub fn has_admin(env: &Env) -> bool {
+    env.storage().instance().has(&DataKey::Admin)
+}
+
 /// Get the admin address.
 pub fn get_admin(env: &Env) -> Address {
     env.storage()

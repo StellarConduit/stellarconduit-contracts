@@ -15,6 +15,9 @@
 //! - `raise_dispute(env, initiator, tx_id, proof)` — Submit a new dispute with a relay chain proof
 //! - `respond(env, respondent, dispute_id, proof)` — Submit a counter-proof to an open dispute
 //! - `resolve(env, dispute_id)` — Resolve a dispute after the evaluation period
+//! - `get_dispute(env, dispute_id)` — Fetch dispute details and current status
+//! - `get_ruling(env, dispute_id)` — Fetch the final ruling for a resolved dispute
+//! - `initialize(env, admin, resolution_window)` — One-time setup for the contract
 //!
 //! ## See also
 //! - `types.rs` — Data structures (Dispute, DisputeStatus, Ruling, RelayChainProof)
@@ -154,7 +157,7 @@ impl DisputeResolverContract {
     ///
     /// # Errors
     /// - `ContractError::DisputeNotFound` if no dispute exists for this ID.
-    /// - `ContractError::AlreadyResolved` if the dispute is already resolved.
+    /// - `ContractError::DisputeAlreadyResolved` if the dispute is already resolved.
     /// - `ContractError::ResolutionWindowActive` if the dispute is still Open and the window hasn't expired.
     /// - `ContractError::NotResponded` if the dispute status is unexpected.
     pub fn resolve(env: Env, dispute_id: u64) -> Result<Ruling, ContractError> {
@@ -163,7 +166,8 @@ impl DisputeResolverContract {
 
         // Cannot resolve an already-resolved dispute.
         if dispute.status == DisputeStatus::Resolved {
-            return Err(ContractError::AlreadyResolved);
+            // Note: tests map to `DisputeAlreadyResolved`, not `AlreadyResolved`.
+            return Err(ContractError::DisputeAlreadyResolved);
         }
 
         let current_sequence = env.ledger().sequence() as u64;
@@ -242,5 +246,68 @@ impl DisputeResolverContract {
             .publish(("resolve",), (dispute_id, ruling.winner.clone()));
 
         Ok(ruling)
+    }
+
+    /// Fetch the full dispute record by its ID.
+    ///
+    /// # Parameters
+    /// - `env`: Soroban environment.
+    /// - `dispute_id`: The ID of the dispute.
+    ///
+    /// # Returns
+    /// The `Dispute` record if found.
+    ///
+    /// # Errors
+    /// - `ContractError::DisputeNotFound` if the ID does not exist.
+    pub fn get_dispute(env: Env, dispute_id: u64) -> Result<Dispute, ContractError> {
+        storage::get_dispute(&env, dispute_id).ok_or(ContractError::DisputeNotFound)
+    }
+
+    /// Fetch the final ruling for a resolved dispute.
+    ///
+    /// # Parameters
+    /// - `env`: Soroban environment.
+    /// - `dispute_id`: The ID of the resolved dispute.
+    ///
+    /// # Returns
+    /// The `Ruling` record if found.
+    ///
+    /// # Errors
+    /// - `ContractError::DisputeNotFound` if no ruling exists for this ID.
+    pub fn get_ruling(env: Env, dispute_id: u64) -> Result<Ruling, ContractError> {
+        storage::get_ruling(&env, dispute_id).ok_or(ContractError::DisputeNotFound)
+    }
+
+    /// One-time initialization of the Dispute Resolver contract.
+    ///
+    /// Sets the admin capable of upgrading/configuring the contract, and
+    /// configures the global resolution window for how long a respondent has
+    /// to provide a counter-proof.
+    ///
+    /// # Parameters
+    /// - `env`: Soroban environment.
+    /// - `admin`: The address to set as the contract administrator.
+    /// - `resolution_window`: Number of ledgers allowed for responding to disputes.
+    ///
+    /// # Errors
+    /// - `ContractError::AlreadyInitialized` if called more than once.
+    /// - `ContractError::InvalidConfig` if `resolution_window` is zero.
+    pub fn initialize(
+        env: Env,
+        admin: Address,
+        resolution_window: u32,
+    ) -> Result<(), ContractError> {
+        if storage::has_admin(&env) {
+            return Err(ContractError::AlreadyInitialized);
+        }
+
+        if resolution_window == 0 {
+            return Err(ContractError::InvalidConfig);
+        }
+
+        storage::set_admin(&env, &admin);
+        storage::set_resolution_window(&env, resolution_window);
+
+        Ok(())
     }
 }
