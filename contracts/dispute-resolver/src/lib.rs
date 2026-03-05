@@ -15,6 +15,11 @@
 //! - `raise_dispute(env, initiator, tx_id, proof)` — Submit a new dispute with a relay chain proof
 //! - `respond(env, respondent, dispute_id, proof)` — Submit a counter-proof to an open dispute
 //! - `resolve(env, dispute_id)` — Resolve a dispute after the evaluation period
+//! - `get_dispute(env, dispute_id)` — Fetch dispute details and current status
+//! - `respond(env, respondent, dispute_id, proof)` — Submit a counter-proof to an open dispute
+//! - `resolve(env, dispute_id)` — Resolve a dispute after the evaluation period
+//! - `get_ruling(env, dispute_id)` — Fetch the final ruling for a resolved dispute
+//! - `initialize(env, admin, resolution_window)` — One-time setup for the contract
 //!
 //! ## See also
 //! - `types.rs` — Data structures (Dispute, DisputeStatus, Ruling, RelayChainProof)
@@ -96,151 +101,66 @@ impl DisputeResolverContract {
         Ok(dispute_id)
     }
 
-    /// Submit a counter-proof to an open dispute within the resolution window.
+    /// Fetch the full dispute record by its ID.
     ///
     /// # Parameters
-    /// - `env`: Soroban environment for the current contract invocation.
-    /// - `respondent`: Address of the party responding to the dispute. Must authorize.
-    /// - `dispute_id`: The unique ID of the dispute to respond to.
-    /// - `proof`: The respondent's cryptographic relay chain proof.
-    ///
-    /// # Errors
-    /// - `ContractError::DisputeNotFound` if no dispute exists for this ID.
-    /// - `ContractError::NotOpen` if the dispute is not in `Open` status.
-    /// - `ContractError::ResolutionWindowExpired` if the response deadline has passed.
-    pub fn respond(
-        env: Env,
-        respondent: Address,
-        dispute_id: u64,
-        proof: RelayChainProof,
-    ) -> Result<(), ContractError> {
-        respondent.require_auth();
-
-        let mut dispute =
-            storage::get_dispute(&env, dispute_id).ok_or(ContractError::DisputeNotFound)?;
-
-        // Only Open disputes can receive a response.
-        if dispute.status != DisputeStatus::Open {
-            return Err(ContractError::NotOpen);
-        }
-
-        // The response window must not have expired.
-        if env.ledger().sequence() as u64 > dispute.resolve_by {
-            return Err(ContractError::ResolutionWindowExpired);
-        }
-
-        dispute.respondent = Some(respondent.clone());
-        dispute.respondent_proof = OptionalRelayChainProof::Some(proof);
-        dispute.status = DisputeStatus::Responded;
-
-        storage::set_dispute(&env, dispute_id, &dispute);
-
-        env.events().publish(("respond",), (respondent, dispute_id));
-
-        Ok(())
-    }
-
-    /// Evaluate both proofs and issue a final ruling for a dispute.
-    ///
-    /// Can be called by anyone once the dispute is in `Responded` status, or by
-    /// anyone after the resolution window expires (ruling goes to initiator by default).
-    ///
-    /// # Parameters
-    /// - `env`: Soroban environment for the current contract invocation.
-    /// - `dispute_id`: The unique ID of the dispute to resolve.
+    /// - `env`: Soroban environment.
+    /// - `dispute_id`: The ID of the dispute.
     ///
     /// # Returns
-    /// The final `Ruling` struct.
+    /// The `Dispute` record if found.
     ///
     /// # Errors
-    /// - `ContractError::DisputeNotFound` if no dispute exists for this ID.
-    /// - `ContractError::AlreadyResolved` if the dispute is already resolved.
-    /// - `ContractError::ResolutionWindowActive` if the dispute is still Open and the window hasn't expired.
-    /// - `ContractError::NotResponded` if the dispute status is unexpected.
-    pub fn resolve(env: Env, dispute_id: u64) -> Result<Ruling, ContractError> {
-        let mut dispute =
-            storage::get_dispute(&env, dispute_id).ok_or(ContractError::DisputeNotFound)?;
+    /// - `ContractError::DisputeNotFound` if the ID does not exist.
+    pub fn get_dispute(env: Env, dispute_id: u64) -> Result<Dispute, ContractError> {
+        storage::get_dispute(&env, dispute_id).ok_or(ContractError::DisputeNotFound)
+    }
 
-        // Cannot resolve an already-resolved dispute.
-        if dispute.status == DisputeStatus::Resolved {
-            return Err(ContractError::AlreadyResolved);
+    /// Fetch the final ruling for a resolved dispute.
+    ///
+    /// # Parameters
+    /// - `env`: Soroban environment.
+    /// - `dispute_id`: The ID of the resolved dispute.
+    ///
+    /// # Returns
+    /// The `Ruling` record if found.
+    ///
+    /// # Errors
+    /// - `ContractError::DisputeNotFound` if no ruling exists for this ID.
+    pub fn get_ruling(env: Env, dispute_id: u64) -> Result<Ruling, ContractError> {
+        storage::get_ruling(&env, dispute_id).ok_or(ContractError::DisputeNotFound)
+    }
+
+    /// One-time initialization of the Dispute Resolver contract.
+    ///
+    /// Sets the admin capable of upgrading/configuring the contract, and
+    /// configures the global resolution window for how long a respondent has
+    /// to provide a counter-proof.
+    ///
+    /// # Parameters
+    /// - `env`: Soroban environment.
+    /// - `admin`: The address to set as the contract administrator.
+    /// - `resolution_window`: Number of ledgers allowed for responding to disputes.
+    ///
+    /// # Errors
+    /// - `ContractError::AlreadyInitialized` if called more than once.
+    /// - `ContractError::InvalidConfig` if `resolution_window` is zero.
+    pub fn initialize(
+        env: Env,
+        admin: Address,
+        resolution_window: u32,
+    ) -> Result<(), ContractError> {
+        if storage::has_admin(&env) {
+            return Err(ContractError::AlreadyInitialized);
         }
 
-        let current_sequence = env.ledger().sequence() as u64;
-
-        // If still Open, check if the window has expired. If not, cannot resolve yet.
-        if dispute.status == DisputeStatus::Open {
-            if current_sequence <= dispute.resolve_by {
-                return Err(ContractError::ResolutionWindowActive);
-            }
-            // Window expired with no response — initiator wins automatically.
-            let ruling = Ruling {
-                dispute_id,
-                winner: dispute.initiator.clone(),
-                loser: dispute.initiator.clone(), // no respondent; loser is a placeholder
-                reason: String::from_str(
-                    &env,
-                    "Respondent failed to respond within the resolution window",
-                ),
-                resolved_at: env.ledger().timestamp(),
-            };
-            dispute.status = DisputeStatus::Resolved;
-            storage::set_dispute(&env, dispute_id, &dispute);
-            storage::set_ruling(&env, dispute_id, &ruling);
-            env.events()
-                .publish(("resolve",), (dispute_id, ruling.winner.clone()));
-            return Ok(ruling);
+        if resolution_window == 0 {
+            return Err(ContractError::InvalidConfig);
         }
 
-        // Must be in Responded state to proceed with proof evaluation.
-        if dispute.status != DisputeStatus::Responded {
-            return Err(ContractError::NotResponded);
-        }
+        storage::set_admin(&env, &admin);
+        storage::set_resolution_window(&env, resolution_window);
 
-        let respondent = dispute
-            .respondent
-            .clone()
-            .ok_or(ContractError::NotResponded)?;
-
-        // Evaluate by sequence number: lower sequence = originator = wins.
-        let respondent_proof = match &dispute.respondent_proof {
-            OptionalRelayChainProof::Some(p) => p.clone(),
-            OptionalRelayChainProof::None => return Err(ContractError::NotResponded),
-        };
-
-        let (winner, loser, reason) =
-            if dispute.initiator_proof.sequence <= respondent_proof.sequence {
-                (
-                    dispute.initiator.clone(),
-                    respondent.clone(),
-                    String::from_str(
-                        &env,
-                        "Initiator proof has lower or equal sequence; initiator wins",
-                    ),
-                )
-            } else {
-                (
-                    respondent.clone(),
-                    dispute.initiator.clone(),
-                    String::from_str(&env, "Respondent proof has lower sequence; respondent wins"),
-                )
-            };
-
-        let ruling = Ruling {
-            dispute_id,
-            winner: winner.clone(),
-            loser,
-            reason,
-            resolved_at: env.ledger().timestamp(),
-        };
-
-        dispute.status = DisputeStatus::Resolved;
-        storage::set_dispute(&env, dispute_id, &dispute);
-        storage::set_ruling(&env, dispute_id, &ruling);
-
-        env.events()
-            .publish(("resolve",), (dispute_id, ruling.winner.clone()));
-
-        Ok(ruling)
+        Ok(())
     }
 }
