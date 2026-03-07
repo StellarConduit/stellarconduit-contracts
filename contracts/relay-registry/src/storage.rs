@@ -34,6 +34,7 @@ pub enum DataKey {
     MinStake,
     StakeLockPeriod,
     Admin,
+    TokenAddress,
 }
 
 pub fn get_node(env: &Env, address: &Address) -> Option<RelayNode> {
@@ -105,4 +106,17 @@ pub fn get_admin(env: &Env) -> Address {
 
 pub fn set_admin(env: &Env, admin: &Address) {
     env.storage().instance().set(&DataKey::Admin, admin);
+}
+
+pub fn get_token_address(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&DataKey::TokenAddress)
+        .expect("token address not initialized")
+}
+
+pub fn set_token_address(env: &Env, token_address: &Address) {
+    env.storage()
+        .instance()
+        .set(&DataKey::TokenAddress, token_address);
 }

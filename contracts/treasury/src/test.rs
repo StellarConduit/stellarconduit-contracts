@@ -12,6 +12,15 @@ use soroban_sdk::{
 // The contract-under-test.
 use crate::{storage, types::SpendingProgram, TreasuryContract, TreasuryContractClient};
 
+use soroban_sdk::token::StellarAssetClient;
+
+fn create_token_contract<'a>(env: &Env, admin: &Address) -> (StellarAssetClient<'a>, Address) {
+    let contract_id = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    (StellarAssetClient::new(env, &contract_id), contract_id)
+}
+
 fn create_treasury_contract<'a>(env: &Env) -> TreasuryContractClient<'a> {
     let contract_id = env.register(TreasuryContract, ());
     TreasuryContractClient::new(env, &contract_id)
@@ -28,10 +37,21 @@ fn test_deposit_increases_balance() {
     env.mock_all_auths();
     let client = create_treasury_contract(&env);
     let from = Address::generate(&env);
+
+    let (token_client, token_address) = create_token_contract(&env, &from);
+    token_client.mint(&from, &10000);
+
+    env.as_contract(&client.address, || {
+        storage::set_token_address(&env, &token_address);
+    });
     assert_eq!(balance_of(&env, &client.address), 0);
 
     client.deposit(&from, &1000);
     assert_eq!(balance_of(&env, &client.address), 1000);
+
+    let token_balance =
+        soroban_sdk::token::Client::new(&env, &token_address).balance(&client.address);
+    assert_eq!(token_balance, 1000);
 }
 
 #[test]
@@ -40,13 +60,19 @@ fn test_deposit_logs_entry_and_emits_event() {
     env.mock_all_auths();
     let client = create_treasury_contract(&env);
     let from = Address::generate(&env);
+    let (token_client, token_address) = create_token_contract(&env, &from);
+    token_client.mint(&from, &10000);
+
+    env.as_contract(&client.address, || {
+        storage::set_token_address(&env, &token_address);
+    });
 
     client.deposit(&from, &500);
 
-    // Val doesn't implement PartialEq; verify count and emitting contract only.
+    // Note: the token transfer also emits an event. The treasury logic emits the SECOND event.
     let events = env.events().all();
-    assert_eq!(events.len(), 1);
-    let (emitting_contract, _topics, _data) = events.first().unwrap();
+    assert_eq!(events.len(), 2);
+    let (emitting_contract, _topics, _data) = events.get(1).unwrap();
     assert_eq!(emitting_contract, client.address);
 }
 
@@ -67,11 +93,21 @@ fn test_withdraw_by_admin() {
     let client = create_treasury_contract(&env);
     let admin = Address::generate(&env);
     let to = Address::generate(&env);
-    env.as_contract(&client.address, || storage::set_admin(&env, &admin));
+
+    let (token_client, token_address) = create_token_contract(&env, &admin);
+    token_client.mint(&admin, &10000);
+
+    env.as_contract(&client.address, || {
+        storage::set_admin(&env, &admin);
+        storage::set_token_address(&env, &token_address);
+    });
     client.deposit(&admin, &5000);
 
     client.withdraw(&to, &1000, &String::from_str(&env, "test"));
     assert_eq!(balance_of(&env, &client.address), 4000);
+
+    let token_balance = soroban_sdk::token::Client::new(&env, &token_address).balance(&to);
+    assert_eq!(token_balance, 1000);
 }
 
 #[test]
@@ -82,7 +118,11 @@ fn test_withdraw_unauthorized() {
     let client = create_treasury_contract(&env);
     let admin = Address::generate(&env);
     let to = Address::generate(&env);
-    env.as_contract(&client.address, || storage::set_admin(&env, &admin));
+    let (_, token_address) = create_token_contract(&env, &admin);
+    env.as_contract(&client.address, || {
+        storage::set_admin(&env, &admin);
+        storage::set_token_address(&env, &token_address);
+    });
     client.withdraw(&to, &1000, &String::from_str(&env, "test"));
 }
 
@@ -93,7 +133,14 @@ fn test_withdraw_insufficient_balance() {
     let client = create_treasury_contract(&env);
     let admin = Address::generate(&env);
     let to = Address::generate(&env);
-    env.as_contract(&client.address, || storage::set_admin(&env, &admin));
+
+    let (token_client, token_address) = create_token_contract(&env, &admin);
+    token_client.mint(&admin, &10000);
+
+    env.as_contract(&client.address, || {
+        storage::set_admin(&env, &admin);
+        storage::set_token_address(&env, &token_address);
+    });
     client.deposit(&admin, &100);
 
     let res = client.try_withdraw(&to, &200, &String::from_str(&env, "test"));
@@ -109,8 +156,13 @@ fn test_allocate_by_admin() {
     env.mock_all_auths();
     let client = create_treasury_contract(&env);
     let admin = Address::generate(&env);
+
+    let (token_client, token_address) = create_token_contract(&env, &admin);
+    token_client.mint(&admin, &20000);
+
     env.as_contract(&client.address, || {
         storage::set_admin(&env, &admin);
+        storage::set_token_address(&env, &token_address);
         let program = SpendingProgram {
             program_id: 1,
             name: String::from_str(&env, "Test Program"),
@@ -138,7 +190,14 @@ fn test_allocate_program_not_found() {
     env.mock_all_auths();
     let client = create_treasury_contract(&env);
     let admin = Address::generate(&env);
-    env.as_contract(&client.address, || storage::set_admin(&env, &admin));
+
+    let (token_client, token_address) = create_token_contract(&env, &admin);
+    token_client.mint(&admin, &20000);
+
+    env.as_contract(&client.address, || {
+        storage::set_admin(&env, &admin);
+        storage::set_token_address(&env, &token_address);
+    });
     client.deposit(&admin, &10000);
 
     let res = client.try_allocate(&99, &1000);
@@ -151,8 +210,13 @@ fn test_allocate_program_inactive() {
     env.mock_all_auths();
     let client = create_treasury_contract(&env);
     let admin = Address::generate(&env);
+
+    let (token_client, token_address) = create_token_contract(&env, &admin);
+    token_client.mint(&admin, &20000);
+
     env.as_contract(&client.address, || {
         storage::set_admin(&env, &admin);
+        storage::set_token_address(&env, &token_address);
         let program = SpendingProgram {
             program_id: 1,
             name: String::from_str(&env, "Test Program"),
@@ -174,8 +238,13 @@ fn test_allocate_over_budget() {
     env.mock_all_auths();
     let client = create_treasury_contract(&env);
     let admin = Address::generate(&env);
+
+    let (token_client, token_address) = create_token_contract(&env, &admin);
+    token_client.mint(&admin, &20000);
+
     env.as_contract(&client.address, || {
         storage::set_admin(&env, &admin);
+        storage::set_token_address(&env, &token_address);
         let program = SpendingProgram {
             program_id: 1,
             name: String::from_str(&env, "Test Program"),
@@ -200,8 +269,13 @@ fn test_allocate_insufficient_treasury_balance() {
     env.mock_all_auths();
     let client = create_treasury_contract(&env);
     let admin = Address::generate(&env);
+
+    let (token_client, token_address) = create_token_contract(&env, &admin);
+    token_client.mint(&admin, &20000);
+
     env.as_contract(&client.address, || {
         storage::set_admin(&env, &admin);
+        storage::set_token_address(&env, &token_address);
         let program = SpendingProgram {
             program_id: 1,
             name: String::from_str(&env, "Test Program"),

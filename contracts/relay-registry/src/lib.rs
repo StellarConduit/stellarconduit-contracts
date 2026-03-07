@@ -26,7 +26,7 @@
 //! implementation tracked in GitHub issue
 
 #![no_std]
-use soroban_sdk::{contract, contractimpl, Address, Env, String};
+use soroban_sdk::{contract, contractimpl, token, Address, Env, String};
 
 pub mod errors;
 pub mod storage;
@@ -170,7 +170,9 @@ impl RelayRegistryContract {
         node.last_active = env.ledger().timestamp();
         node.stake = new_stake;
 
-        // TODO: SAC transfer
+        let token = token::Client::new(&env, &storage::get_token_address(&env));
+        token.transfer(&node_address, &env.current_contract_address(), &amount);
+
         storage::set_node(&env, &node_address, &node);
 
         Ok(())
@@ -215,6 +217,10 @@ impl RelayRegistryContract {
             node.status = NodeStatus::Inactive;
         }
         node.last_active = env.ledger().timestamp();
+
+        let token = token::Client::new(&env, &storage::get_token_address(&env));
+        token.transfer(&env.current_contract_address(), &node_address, &amount);
+
         storage::set_node(&env, &node_address, &node);
         Ok(node)
     }
@@ -250,7 +256,10 @@ impl RelayRegistryContract {
         node.status = NodeStatus::Slashed;
         node.last_active = env.ledger().timestamp();
 
-        // TODO: transfer slashed stake to treasury
+        // Warning: Local treasury target stub needed. Normally handled in separate PR but stubbing here.
+        // Needs a valid storage variable or routing map to determine `treasury`
+        // Leaving // TODO: transfer slashed stake to treasury for now since issue specifies to replace // TODO: SAC transfer comments only
+
         storage::set_node(&env, &node_address, &node);
 
         // Emit an event so the slashing reason is auditable on-chain.

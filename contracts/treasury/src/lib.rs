@@ -27,7 +27,7 @@
 
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, Address, Env, String};
+use soroban_sdk::{contract, contractimpl, token, Address, Env, String};
 
 pub mod errors;
 pub mod storage;
@@ -72,7 +72,9 @@ impl TreasuryContract {
         };
         storage::set_entry(&env, entry);
 
-        // TODO: SAC transfer
+        let token_address = storage::get_token_address(&env);
+        let token = token::Client::new(&env, &token_address);
+        token.transfer(&from, &env.current_contract_address(), &amount);
 
         env.events().publish(("deposit",), (from.clone(), amount));
 
@@ -121,6 +123,9 @@ impl TreasuryContract {
             ledger: env.ledger().sequence() as u64,
         };
         storage::set_entry(&env, entry);
+
+        let token = token::Client::new(&env, &storage::get_token_address(&env));
+        token.transfer(&env.current_contract_address(), &to, &amount);
 
         env.events().publish(("withdraw",), (to.clone(), amount));
 
@@ -184,6 +189,17 @@ impl TreasuryContract {
             ledger: env.ledger().sequence() as u64,
         };
         storage::set_entry(&env, entry);
+
+        // Warning: Local program recipient address map missing. Treasury allocate usually
+        // moves funds to a dedicated escrow account or recipient specified by the program.
+        // For Issue #36: `transfer amount tokens out of the treasury to the to / program recipient address`
+        // Given that `SpendingProgram` does not have a `recipient_address` defined in `types.rs`,
+        // and its signature is `allocate(env, program, amount)`, we cannot transfer it correctly on-chain
+        // without knowing `to`. A `TODO` is raised.
+
+        // TODO: Map program_id to its recipient address and transfer SAC token.
+        // let token = token::Client::new(&env, &storage::get_token_address(&env));
+        // token.transfer(&env.current_contract_address(), &program_recipient_address, &amount);
 
         Ok(())
     }
