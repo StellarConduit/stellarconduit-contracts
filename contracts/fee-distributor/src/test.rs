@@ -3,21 +3,16 @@
 //! Comprehensive unit tests for the Fee Distributor contract covering all
 //! public functions, happy paths, and error cases.
 
-#![cfg(test)]
-
 extern crate std;
 
-use soroban_sdk::{
-    testutils::{Address as _, Events as _},
-    Address, Env,
-};
+use soroban_sdk::{testutils::Address as _, Address, Env};
 
 use crate::{errors::ContractError, FeeDistributorContract, FeeDistributorContractClient};
 
 fn setup<'a>() -> (Env, FeeDistributorContractClient<'a>) {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register_contract(None, FeeDistributorContract);
+    let contract_id = env.register(FeeDistributorContract, ());
     let client = FeeDistributorContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let treasury = Address::generate(&env);
@@ -33,7 +28,7 @@ fn setup<'a>() -> (Env, FeeDistributorContractClient<'a>) {
 fn test_initialize_success() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register_contract(None, FeeDistributorContract);
+    let contract_id = env.register(FeeDistributorContract, ());
     let client = FeeDistributorContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let treasury = Address::generate(&env);
@@ -50,7 +45,7 @@ fn test_initialize_success() {
 fn test_initialize_already_initialized() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register_contract(None, FeeDistributorContract);
+    let contract_id = env.register(FeeDistributorContract, ());
     let client = FeeDistributorContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let treasury = Address::generate(&env);
@@ -250,7 +245,7 @@ fn test_claim_auth_required() {
     // Create a new env without mock_all_auths to test auth requirement
     let env2 = Env::default();
     // Don't call env2.mock_all_auths() - this should cause auth to fail
-    let contract_id = env2.register_contract(None, FeeDistributorContract);
+    let contract_id = env2.register(FeeDistributorContract, ());
     let client2 = FeeDistributorContractClient::new(&env2, &contract_id);
 
     // This should panic because relay hasn't authorized
@@ -300,7 +295,7 @@ fn test_get_earnings_default() {
 fn test_set_fee_rate_success() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register_contract(None, FeeDistributorContract);
+    let contract_id = env.register(FeeDistributorContract, ());
     let client = FeeDistributorContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let treasury = Address::generate(&env);
@@ -320,7 +315,7 @@ fn test_set_fee_rate_success() {
 fn test_set_fee_rate_invalid_zero() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register_contract(None, FeeDistributorContract);
+    let contract_id = env.register(FeeDistributorContract, ());
     let client = FeeDistributorContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let treasury = Address::generate(&env);
@@ -336,7 +331,7 @@ fn test_set_fee_rate_invalid_zero() {
 fn test_set_fee_rate_invalid_above_max() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register_contract(None, FeeDistributorContract);
+    let contract_id = env.register(FeeDistributorContract, ());
     let client = FeeDistributorContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let treasury = Address::generate(&env);
@@ -353,7 +348,7 @@ fn test_set_fee_rate_invalid_above_max() {
 fn test_set_fee_rate_unauthorized() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register_contract(None, FeeDistributorContract);
+    let contract_id = env.register(FeeDistributorContract, ());
     let client = FeeDistributorContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let treasury = Address::generate(&env);
@@ -363,7 +358,7 @@ fn test_set_fee_rate_unauthorized() {
     // Create a new env without mock_all_auths and try to call as non-admin
     let env2 = Env::default();
     // Don't call env2.mock_all_auths() - this should cause auth to fail
-    let contract_id2 = env2.register_contract(None, FeeDistributorContract);
+    let contract_id2 = env2.register(FeeDistributorContract, ());
     let client2 = FeeDistributorContractClient::new(&env2, &contract_id2);
 
     // This should panic because non-admin hasn't authorized
@@ -453,7 +448,7 @@ fn test_claim_after_multiple_distributions() {
 fn test_calculate_fee_with_different_rates() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register_contract(None, FeeDistributorContract);
+    let contract_id = env.register(FeeDistributorContract, ());
     let client = FeeDistributorContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let treasury = Address::generate(&env);
@@ -549,7 +544,7 @@ fn test_distribute_large_batch_size() {
 fn test_fee_rate_change_affects_future_distributions() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register_contract(None, FeeDistributorContract);
+    let contract_id = env.register(FeeDistributorContract, ());
     let client = FeeDistributorContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let treasury = Address::generate(&env);
@@ -575,7 +570,7 @@ fn test_fee_rate_change_affects_future_distributions() {
 fn test_treasury_share_calculation_edge_cases() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register_contract(None, FeeDistributorContract);
+    let contract_id = env.register(FeeDistributorContract, ());
     let client = FeeDistributorContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let treasury = Address::generate(&env);
@@ -635,7 +630,7 @@ fn test_calculate_fee_rounding_behavior() {
 fn test_set_fee_rate_boundary_values() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register_contract(None, FeeDistributorContract);
+    let contract_id = env.register(FeeDistributorContract, ());
     let client = FeeDistributorContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let treasury = Address::generate(&env);
@@ -657,7 +652,7 @@ fn test_set_fee_rate_boundary_values() {
 fn test_distribute_with_zero_treasury_share() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register_contract(None, FeeDistributorContract);
+    let contract_id = env.register(FeeDistributorContract, ());
     let client = FeeDistributorContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let treasury = Address::generate(&env);
@@ -679,7 +674,7 @@ fn test_distribute_with_zero_treasury_share() {
 fn test_distribute_with_max_treasury_share() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register_contract(None, FeeDistributorContract);
+    let contract_id = env.register(FeeDistributorContract, ());
     let client = FeeDistributorContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let treasury = Address::generate(&env);
