@@ -29,9 +29,26 @@
 
 use soroban_sdk::{contract, contractimpl, Address, Env};
 
+/// Cross-contract client for the relay-registry contract.
+/// Uses a manually defined trait interface to avoid requiring the compiled WASM at build time.
+/// This approach is preferred for modularity and testability in multi-contract environments.
+mod relay_registry {
+    use soroban_sdk::{contractclient, Address, Env};
+
+    #[allow(dead_code)]
+    #[contractclient(name = "RelayRegistryClient")]
+    pub trait RelayRegistry {
+        /// Returns true if the relay node at `address` has Active status.
+        fn is_active(env: &Env, address: Address) -> bool;
+    }
+}
+
 pub mod errors;
 pub mod storage;
 pub mod types;
+
+#[cfg(test)]
+mod integration_test;
 
 use crate::errors::ContractError;
 
@@ -40,6 +57,43 @@ pub struct FeeDistributorContract;
 
 #[contractimpl]
 impl FeeDistributorContract {
+    /// Initialize the fee distributor contract.
+    ///
+    /// Must be called once after deployment. Sets up the fee configuration
+    /// and stores the relay registry contract address for cross-contract calls.
+    ///
+    /// # Parameters
+    /// - `env`: Soroban environment.
+    /// - `admin`: Address authorized to update fee rates.
+    /// - `fee_rate_bps`: Initial fee rate in basis points.
+    /// - `treasury_share_bps`: Portion of each fee allocated to the treasury.
+    /// - `relay_registry_address`: Deployed address of the relay-registry contract.
+    ///
+    /// # Errors
+    /// - `ContractError::InvalidFeeRate` if `fee_rate_bps` is 0 or greater than 10000.
+    pub fn initialize(
+        env: Env,
+        admin: Address,
+        fee_rate_bps: u32,
+        treasury_share_bps: u32,
+        relay_registry_address: Address,
+    ) -> Result<(), ContractError> {
+        if fee_rate_bps == 0 || fee_rate_bps > 10_000 {
+            return Err(ContractError::InvalidFeeRate);
+        }
+
+        let config = crate::types::FeeConfig {
+            admin,
+            fee_rate_bps,
+            treasury_share_bps,
+        };
+
+        storage::set_fee_config(&env, &config);
+        storage::set_relay_registry_address(&env, &relay_registry_address);
+
+        Ok(())
+    }
+
     /// Calculate the total fee for a given batch of transactions.
     ///
     /// This is a pure calculation function that reads the configured fee rate
@@ -101,6 +155,14 @@ impl FeeDistributorContract {
     ) -> Result<(), ContractError> {
         if storage::get_fee_entry(&env, batch_id).is_some() {
             return Err(ContractError::BatchAlreadyDistributed);
+        }
+
+        // Cross-contract call: verify relay node is Active in the registry
+        // before distributing any fees. Inactive or Slashed nodes are rejected.
+        let registry_address = storage::get_relay_registry_address(&env);
+        let registry = relay_registry::RelayRegistryClient::new(&env, &registry_address);
+        if !registry.is_active(&relay_address) {
+            return Err(ContractError::RelayNodeInactive);
         }
 
         let fee = Self::calculate_fee(env.clone(), batch_size)?;
@@ -233,3 +295,5 @@ impl FeeDistributorContract {
         Ok(())
     }
 }
+
+
