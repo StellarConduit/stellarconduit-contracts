@@ -50,4 +50,10 @@ pub enum ContractError {
 
     /// Arithmetic overflow in stake calculation.
     Overflow = 9,
+
+    /// Contract has already been initialized.
+    AlreadyInitialized = 10,
+
+    /// A provided numeric argument is invalid (zero or negative).
+    InvalidAmount = 11,
 }

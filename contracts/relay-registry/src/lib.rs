@@ -40,6 +40,52 @@ pub struct RelayRegistryContract;
 
 #[contractimpl]
 impl RelayRegistryContract {
+    /// Initialize the contract with admin address, minimum stake, and stake lock period.
+    ///
+    /// This is a one-time setup function called immediately after the contract is deployed.
+    /// It sets the admin address, minimum stake requirement, and stake lock period.
+    /// It can only be called once.
+    ///
+    /// # Parameters
+    /// - `env`: Soroban environment for the current contract invocation.
+    /// - `admin`: Address of the admin account authorized to slash nodes and update config.
+    /// - `min_stake`: Minimum required stake amount. Must be greater than zero.
+    /// - `stake_lock_period`: Number of ledgers a node must wait before unstaking. Must be greater than zero.
+    ///
+    /// # Errors
+    /// - `ContractError::AlreadyInitialized` if the contract has already been initialized.
+    /// - `ContractError::InvalidAmount` if `min_stake` is zero or negative, or if `stake_lock_period` is zero.
+    pub fn initialize(
+        env: Env,
+        admin: Address,
+        min_stake: i128,
+        stake_lock_period: u32,
+    ) -> Result<(), ContractError> {
+        // Guard against re-initialization
+        if env.storage().instance().has(&storage::DataKey::Admin) {
+            return Err(ContractError::AlreadyInitialized);
+        }
+
+        // Validate inputs
+        if min_stake <= 0 {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        if stake_lock_period == 0 {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        // Persist config
+        storage::set_admin(&env, &admin);
+        storage::set_min_stake(&env, min_stake);
+        storage::set_stake_lock_period(&env, stake_lock_period);
+
+        // Initialize node count
+        storage::set_node_count(&env, 0);
+
+        Ok(())
+    }
+
     /// Register a new relay node with the given address and metadata.
     ///
     /// # Parameters
