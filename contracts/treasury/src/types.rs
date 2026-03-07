@@ -26,9 +26,6 @@
 
 use soroban_sdk::{contracttype, Address, String};
 
-
-
-
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AllocationRecord {
@@ -36,7 +33,6 @@ pub struct AllocationRecord {
     pub allocated: i128,
     pub spent: i128,
 }
-
 
 /// Kind of treasury transaction entry.
 #[contracttype]
@@ -82,5 +78,4 @@ pub struct SpendingProgram {
     pub active: bool,
     /// Human-readable name/description.
     pub name: String,
-
 }

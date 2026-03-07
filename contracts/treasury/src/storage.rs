@@ -60,7 +60,6 @@ pub fn get_entry(env: &Env, entry_id: u64) -> Option<TreasuryEntry> {
     env.storage().persistent().get(&DataKey::Entry(entry_id))
 }
 
-
 /// Append a new entry and increment the entry counter.
 pub fn set_entry(env: &Env, entry: TreasuryEntry) {
     let count = get_entry_count(env);
@@ -78,7 +77,6 @@ pub fn get_entry_count(env: &Env) -> u64 {
         .get(&DataKey::EntryCount)
         .unwrap_or(0)
 }
-
 
 pub fn set_entry_count(env: &Env, count: u64) {
     env.storage().instance().set(&DataKey::EntryCount, &count);
@@ -138,7 +136,6 @@ pub fn has_admin(env: &Env) -> bool {
     env.storage().instance().has(&DataKey::Admin)
 }
 
-
 /// Load the treasury token SAC address.
 pub fn get_token_address(env: &Env) -> Address {
     env.storage()
@@ -152,5 +149,4 @@ pub fn set_token_address(env: &Env, token_address: &Address) {
     env.storage()
         .instance()
         .set(&DataKey::TokenAddress, token_address);
-
 }

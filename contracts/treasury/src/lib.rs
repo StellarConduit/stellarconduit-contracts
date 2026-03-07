@@ -36,13 +36,11 @@ pub mod types;
 use crate::errors::ContractError;
 use crate::types::{EntryKind, TreasuryEntry};
 
-
 #[contract]
 pub struct TreasuryContract;
 
 #[contractimpl]
 impl TreasuryContract {
-
     /// Returns the current treasury token balance.
     ///
     /// Public view function; never errors. Returns 0 if balance is unset.

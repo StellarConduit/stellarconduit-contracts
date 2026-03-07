@@ -19,14 +19,12 @@
 
 use soroban_sdk::contracterror;
 
-
 /// All error codes returned by the Protocol Treasury contract.
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum ContractError {
-
     InsufficientBalance = 1,
     Unauthorized = 2,
     InvalidAmount = 3,
@@ -43,5 +41,4 @@ pub enum ContractError {
 
     /// Allocation would exceed program budget.
     ProgramOverBudget = 12,
-
 }
