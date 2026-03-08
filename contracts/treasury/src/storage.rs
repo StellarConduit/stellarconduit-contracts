@@ -38,6 +38,8 @@ pub enum DataKey {
     EntryCount,
     /// A TreasuryEntry keyed by entry_id.
     Entry(u64),
+    /// Total number of created programs.
+    ProgramCount,
     /// Allocation records keyed by program name.
     Allocation(String),
     /// A SpendingProgram keyed by program_id.
@@ -111,6 +113,22 @@ pub fn get_spending_program(env: &Env, program_id: u64) -> Option<SpendingProgra
     env.storage()
         .persistent()
         .get(&DataKey::SpendingProgram(program_id))
+}
+
+pub fn get_program_count(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&DataKey::ProgramCount)
+        .unwrap_or(0)
+}
+
+pub fn increment_program_count(env: &Env) -> u64 {
+    let count = get_program_count(env);
+    let next_id = count.checked_add(1).expect("program count overflow");
+    env.storage()
+        .instance()
+        .set(&DataKey::ProgramCount, &next_id);
+    next_id
 }
 
 /// Persist a spending program.

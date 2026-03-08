@@ -34,7 +34,7 @@ pub mod storage;
 pub mod types;
 
 use crate::errors::ContractError;
-use crate::types::{AdminCouncil, EntryKind, TreasuryEntry, TreasuryStats};
+use crate::types::{AdminCouncil, EntryKind, SpendingProgram, TreasuryEntry, TreasuryStats};
 
 fn require_council_auth(env: &Env) {
     let council = storage::get_admin_council(env);
@@ -210,6 +210,101 @@ impl TreasuryContract {
         );
 
         Ok(())
+    }
+
+    /// Create a new spending program with a specified budget.
+    ///
+    /// # Parameters
+    /// - `env`: Soroban environment.
+    /// - `name`: Name of the program (3-64 chars).
+    /// - `budget`: Initial budget for the program. Must be > 0.
+    pub fn create_program(env: Env, name: String, budget: i128) -> Result<u64, ContractError> {
+        require_council_auth(&env);
+
+        if budget <= 0 {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        if name.len() < 3 || name.len() > 64 {
+            return Err(ContractError::InvalidProgramName);
+        }
+
+        let program_id = storage::increment_program_count(&env);
+
+        let program = SpendingProgram {
+            program_id,
+            budget,
+            spent: 0,
+            active: true,
+            name: name.clone(),
+        };
+
+        storage::set_spending_program(&env, program_id, program);
+
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "treasury"),
+                soroban_sdk::Symbol::new(&env, "create_program"),
+            ),
+            (program_id, name, budget),
+        );
+
+        Ok(program_id)
+    }
+
+    /// Update the budget of an existing spending program.
+    pub fn update_program_budget(
+        env: Env,
+        program_id: u64,
+        new_budget: i128,
+    ) -> Result<(), ContractError> {
+        require_council_auth(&env);
+
+        let mut program = storage::get_spending_program(&env, program_id)
+            .ok_or(ContractError::ProgramNotFound)?;
+
+        if new_budget < program.spent {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        program.budget = new_budget;
+        storage::set_spending_program(&env, program_id, program);
+
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "treasury"),
+                soroban_sdk::Symbol::new(&env, "update_budget"),
+            ),
+            (program_id, new_budget),
+        );
+
+        Ok(())
+    }
+
+    /// Deactivate a spending program.
+    pub fn deactivate_program(env: Env, program_id: u64) -> Result<(), ContractError> {
+        require_council_auth(&env);
+
+        let mut program = storage::get_spending_program(&env, program_id)
+            .ok_or(ContractError::ProgramNotFound)?;
+
+        program.active = false;
+        storage::set_spending_program(&env, program_id, program);
+
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "treasury"),
+                soroban_sdk::Symbol::new(&env, "deactivate_program"),
+            ),
+            (program_id,),
+        );
+
+        Ok(())
+    }
+
+    /// Get details of a spending program.
+    pub fn get_program(env: Env, program_id: u64) -> Result<SpendingProgram, ContractError> {
+        storage::get_spending_program(&env, program_id).ok_or(ContractError::ProgramNotFound)
     }
 
     /// Allocate treasury funds to a spending program (admin only).

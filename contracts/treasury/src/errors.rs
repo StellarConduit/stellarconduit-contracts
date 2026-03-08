@@ -47,4 +47,7 @@ pub enum ContractError {
 
     /// Council config is invalid (threshold > members, etc.).
     InvalidCouncilConfig = 14,
+
+    /// Program name length is out of bounds.
+    InvalidProgramName = 15,
 }
