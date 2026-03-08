@@ -451,11 +451,37 @@ impl RelayRegistryContract {
 
         Ok(())
     }
-
+    /// Retrieves a registered relay node's details.
+    ///
+    /// This is a view-only function that returns the `RelayNode` struct
+    /// associated with the given address. It does not require authorization.
+    ///
+    /// # Parameters
+    /// - `env`: Soroban environment for the current contract invocation.
+    /// - `address`: The Stellar account address of the relay node to lookup.
+    ///
+    /// # Returns
+    /// - `Ok(RelayNode)`: The registered node details if found.
+    ///
+    /// # Errors
+    /// - `ContractError::NotRegistered`: If the address is not registered in the registry.
     pub fn get_node(env: Env, address: Address) -> Result<RelayNode, ContractError> {
         storage::get_node(&env, &address).ok_or(ContractError::NotRegistered)
     }
 
+    /// Checks if a relay node is currently active.
+    ///
+    /// This is a view-only function that returns true if the given address is
+    /// a registered relay node with a status of `NodeStatus::Active`. It does not
+    /// require authorization. This function never errors; it returns false for any unknown or inactive address.
+    ///
+    /// # Parameters
+    /// - `env`: Soroban environment for the current contract invocation.
+    /// - `address`: The Stellar account address of the relay node to check.
+    ///
+    /// # Returns
+    /// - `true`: If the node exists and its status is `NodeStatus::Active`.
+    /// - `false`: If the node is not registered, or its status is not active.
     pub fn is_active(env: Env, address: Address) -> bool {
         matches!(
             storage::get_node(&env, &address).map(|n| n.status),
