@@ -62,4 +62,10 @@ pub enum ContractError {
 
     /// Council config is invalid (threshold > members, etc.)
     InvalidCouncilConfig = 13,
+
+    /// Caller does not have a pending unstake request.
+    NoPendingUnstake = 14,
+
+    /// Attempted withdrawal before the lock period elapsed.
+    LockPeriodActive = 15,
 }

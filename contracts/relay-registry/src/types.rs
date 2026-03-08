@@ -79,6 +79,8 @@ pub struct RelayNode {
 pub struct StakeEntry {
     /// The Stellar account address that initiated the unstake operation.
     pub address: Address,
+    /// The amount of tokens unbonded.
+    pub amount: i128,
     /// Ledger number when the unstaked tokens can be withdrawn.
     pub unlocks_at: u64,
 }

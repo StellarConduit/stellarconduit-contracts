@@ -4,7 +4,10 @@ use relay_registry::{
     types::{AdminCouncil, NodeMetadata, NodeStatus},
     RelayRegistryContract, RelayRegistryContractClient,
 };
-use soroban_sdk::{testutils::Address as _, Address, Env, String};
+use soroban_sdk::{
+    testutils::{Address as _, Ledger},
+    token, Address, Env, String,
+};
 
 fn setup<'a>() -> (Env, RelayRegistryContractClient<'a>, Address) {
     let env = Env::default();
@@ -179,4 +182,105 @@ fn test_update_metadata_auth_required_clean() {
         uptime_commitment: 98,
     };
     client.update_metadata(&node_addr, &new_metadata);
+}
+
+#[test]
+fn test_unstake_creates_lock_entry() {
+    let (env, client, _admin) = setup();
+
+    // We must deploy a deterministic token contract and initialize it for stakes
+    let token_admin = Address::generate(&env);
+    let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token_contract.address());
+    let token_address = token_client.address.clone();
+
+    // Set the token address in the registry manually by calling the storage helper directly
+    // because the client's initialize() in this contract version didn't natively take a token address.
+    // However, wait, in our setup we don't have access to storage helpers from the test if we only use the client?
+    // Let's look at `storage::set_token_address(&env, &token_address)`
+    // It's a public function.
+    env.as_contract(&client.address, || {
+        relay_registry::storage::set_token_address(&env, &token_address);
+    });
+
+    let node_addr = Address::generate(&env);
+    let metadata = NodeMetadata {
+        region: String::from_str(&env, "us-east"),
+        capacity: 1000,
+        uptime_commitment: 99,
+    };
+
+    // Mint tokens to the node so it can stake
+    token_client.mint(&node_addr, &500);
+
+    client.register(&node_addr, &metadata);
+    client.stake(&node_addr, &200);
+
+    let node_pre_unstake = client.get_node(&node_addr);
+    assert_eq!(node_pre_unstake.stake, 200);
+
+    // Unstake 50 tokens
+    client.unstake(&node_addr, &50);
+
+    let node_post_unstake = client.get_node(&node_addr);
+    assert_eq!(node_post_unstake.stake, 150);
+
+    // Instead of tokens arriving immediately, we verify the lock entry exists.
+    // It's hard to read `get_lock_entry` via client because we didn't expose it,
+    // but we can test `finalize_unstake` fails if lock period is active.
+    let res = client.try_finalize_unstake(&node_addr);
+    assert!(res.is_err()); // LockPeriodActive
+}
+
+#[test]
+fn test_finalize_unstake_success_after_lock() {
+    let (env, client, _admin) = setup();
+
+    let token_admin = Address::generate(&env);
+    let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token_contract.address());
+    let token_address = token_client.address.clone();
+
+    env.as_contract(&client.address, || {
+        relay_registry::storage::set_token_address(&env, &token_address);
+    });
+
+    let node_addr = Address::generate(&env);
+    let metadata = NodeMetadata {
+        region: String::from_str(&env, "us-east"),
+        capacity: 1000,
+        uptime_commitment: 99,
+    };
+
+    token_client.mint(&node_addr, &500);
+
+    client.register(&node_addr, &metadata);
+    client.stake(&node_addr, &200);
+    client.unstake(&node_addr, &50);
+
+    // Advance time past the 10 ledger lock period
+    env.ledger().with_mut(|l| l.timestamp += 11);
+
+    // Node balance should be 300 (500 minted - 200 staked)
+    let token_client_standard = token::Client::new(&env, &token_contract.address());
+    assert_eq!(token_client_standard.balance(&node_addr), 300);
+
+    // Finalize
+    client.finalize_unstake(&node_addr);
+
+    // Node balance should correctly increment by 50
+    assert_eq!(token_client_standard.balance(&node_addr), 350);
+
+    // Fetching the entry again should yield NoPendingUnstake
+    let res2 = client.try_finalize_unstake(&node_addr);
+    assert!(res2.is_err());
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #14)")] // NoPendingUnstake
+fn test_finalize_unstake_no_entry() {
+    let (env, client, _) = setup();
+    let node_addr = Address::generate(&env);
+
+    client.finalize_unstake(&node_addr);
 }

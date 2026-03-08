@@ -35,6 +35,7 @@ pub enum DataKey {
     StakeLockPeriod,
     AdminCouncil,
     TokenAddress,
+    LockEntry(Address),
 }
 
 pub fn get_node(env: &Env, address: &Address) -> Option<RelayNode> {
@@ -121,4 +122,22 @@ pub fn set_token_address(env: &Env, token_address: &Address) {
     env.storage()
         .instance()
         .set(&DataKey::TokenAddress, token_address);
+}
+
+pub fn get_lock_entry(env: &Env, address: &Address) -> Option<crate::types::StakeEntry> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::LockEntry(address.clone()))
+}
+
+pub fn set_lock_entry(env: &Env, address: &Address, entry: &crate::types::StakeEntry) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::LockEntry(address.clone()), entry);
+}
+
+pub fn remove_lock_entry(env: &Env, address: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::LockEntry(address.clone()));
 }

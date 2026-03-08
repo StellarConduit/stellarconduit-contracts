@@ -33,7 +33,7 @@ pub mod storage;
 pub mod types;
 
 use crate::errors::ContractError;
-use crate::types::{AdminCouncil, NodeMetadata, NodeStatus, RelayNode};
+use crate::types::{AdminCouncil, NodeMetadata, NodeStatus, RelayNode, StakeEntry};
 
 fn require_council_auth(env: &Env) {
     let council = storage::get_admin_council(env);
@@ -324,13 +324,10 @@ impl RelayRegistryContract {
             return Err(ContractError::NodeNotActive);
         }
 
-        let unlock_after = node
-            .registered_at
+        let current_time = env.ledger().timestamp();
+        let unlock_after = current_time
             .checked_add(storage::get_stake_lock_period(&env) as u64)
             .ok_or(ContractError::Overflow)?;
-        if env.ledger().timestamp() < unlock_after {
-            return Err(ContractError::StakeLocked);
-        }
         if amount > node.stake {
             return Err(ContractError::InsufficientStake);
         }
@@ -345,8 +342,13 @@ impl RelayRegistryContract {
         }
         node.last_active = env.ledger().timestamp();
 
-        let token = token::Client::new(&env, &storage::get_token_address(&env));
-        token.transfer(&env.current_contract_address(), &node_address, &amount);
+        // Create the pending unstake entry instead of transferring tokens immediately
+        let entry = StakeEntry {
+            address: node_address.clone(),
+            amount,
+            unlocks_at: unlock_after,
+        };
+        storage::set_lock_entry(&env, &node_address, &entry);
 
         storage::set_node(&env, &node_address, &node);
 
@@ -359,6 +361,46 @@ impl RelayRegistryContract {
         );
 
         Ok(node)
+    }
+
+    /// Withdraws explicitly unstaked tokens after the mandatory locking period concludes.
+    ///
+    /// # Parameters
+    /// - `env`: Soroban environment for the current contract invocation.
+    /// - `node_address`: Stellar account address of the relay node. Must authorize this call.
+    ///
+    /// # Errors
+    /// - `ContractError::NoPendingUnstake` if there isn't an active unstake request.
+    /// - `ContractError::LockPeriodActive` if the lock duration hasn't concluded yet.
+    pub fn finalize_unstake(env: Env, node_address: Address) -> Result<i128, ContractError> {
+        node_address.require_auth();
+
+        let entry =
+            storage::get_lock_entry(&env, &node_address).ok_or(ContractError::NoPendingUnstake)?;
+
+        let current_time = env.ledger().timestamp();
+        if current_time < entry.unlocks_at {
+            return Err(ContractError::LockPeriodActive);
+        }
+
+        storage::remove_lock_entry(&env, &node_address);
+
+        let token = token::Client::new(&env, &storage::get_token_address(&env));
+        token.transfer(
+            &env.current_contract_address(),
+            &node_address,
+            &entry.amount,
+        );
+
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "relay_registry"),
+                soroban_sdk::Symbol::new(&env, "finalize_unstake"),
+            ),
+            (node_address.clone(), entry.amount),
+        );
+
+        Ok(entry.amount)
     }
 
     /// Permanently penalize a misbehaving relay node by forfeiting its stake.
