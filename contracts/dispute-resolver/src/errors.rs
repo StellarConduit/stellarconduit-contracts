@@ -6,44 +6,36 @@
 
 use soroban_sdk::contracterror;
 
-/// Contract error codes returned by the Dispute Resolver.
+/// Contract error codes returned by the Dispute Resolver contract.
+///
+/// Each variant represents a typed failure state for arbitration flows
+/// and maps to a stable `u32` value for clients and callers.
 #[contracterror]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
 pub enum ContractError {
-    /// The specified dispute_id does not exist in storage.
+    /// Thrown when the referenced dispute ID does not exist in storage.
     DisputeNotFound = 1,
-    /// The dispute has already been resolved or ruled on.
-    DisputeAlreadyResolved = 2,
-    /// The dispute passed its resolution deadline without a response.
-    DisputeExpired = 3,
-    /// The dispute is still open and awaiting a counter-proof.
-    DisputeNotResolvable = 4,
-    /// The calling party has already submitted a proof for this dispute.
-    ProofAlreadySubmitted = 5,
-    /// The submitted relay chain proof fails cryptographic verification.
-    InvalidProof = 6,
-    /// Caller is not a party to this dispute.
-    Unauthorized = 7,
-    /// A dispute for this transaction ID already exists.
+    /// Thrown when a dispute is not currently in the Open state.
+    NotOpen = 2,
+    /// Thrown when resolution is attempted before a respondent has submitted a response.
+    NotResponded = 3,
+    /// Thrown when the response deadline has already passed.
+    ResolutionWindowExpired = 4,
+    /// Thrown when resolution is attempted while the respondent window is still active.
+    ResolutionWindowActive = 5,
+    /// Thrown when the cryptographic signature on a provided proof is invalid.
+    InvalidProofSignature = 6,
+    /// Thrown when a provided relay chain hash is malformed.
+    InvalidChainHash = 7,
+    /// Thrown when a dispute for the same transaction ID has already been raised.
     DuplicateDispute = 8,
-    /// Arithmetic overflow in dispute ID generation.
-    Overflow = 9,
-    /// The dispute is not in Open status.
-    NotOpen = 10,
-    /// The resolution window has expired.
-    ResolutionWindowExpired = 11,
-    /// The resolution window is still active.
-    ResolutionWindowActive = 12,
-    /// The dispute has not been responded to.
-    NotResponded = 13,
-    /// The contract has already been initialized.
-    AlreadyInitialized = 14,
-    /// Invalid configuration parameter.
-    InvalidConfig = 15,
-    /// One or both relay chain proof signatures failed Ed25519 verification.
-    InvalidProofSignature = 16,
-    /// Not enough council members authorized this action.
-    InsufficientApprovals = 17,
-    /// Council config is invalid (threshold > members, etc.).
-    InvalidCouncilConfig = 18,
+    /// Thrown when the caller is not authorized to perform the action.
+    Unauthorized = 9,
+    /// Thrown when the dispute has already been finalized.
+    AlreadyResolved = 10,
+    /// Thrown when contract initialization has not been performed yet.
+    NotInitialized = 11,
+    /// Thrown when initialization is attempted after the contract is already initialized.
+    AlreadyInitialized = 12,
 }
