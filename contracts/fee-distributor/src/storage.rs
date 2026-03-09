@@ -37,6 +37,8 @@ pub enum DataKey {
     FeeConfig,
     /// Stores the treasury contract address.
     TreasuryAddress,
+    /// Stores the deployed relay-registry contract address.
+    RelayRegistryAddress,
     /// Stores the token contract address.
     TokenAddress,
 }
@@ -169,12 +171,33 @@ pub fn set_treasury_address(env: &Env, address: &Address) {
         .set(&DataKey::TreasuryAddress, address);
 }
 
+/// Load the relay registry contract address.
 /// Load the token contract address.
 ///
 /// # Parameters
 /// - `env`: Soroban environment.
 ///
 /// # Returns
+/// The `Address` of the relay registry contract.
+///
+/// # Panics
+/// Panics if the relay registry address has not been initialized.
+pub fn get_relay_registry_address(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&DataKey::RelayRegistryAddress)
+        .expect("relay registry address not initialized")
+}
+
+/// Set the relay registry contract address.
+///
+/// # Parameters
+/// - `env`: Soroban environment.
+/// - `address`: The relay registry contract address to store.
+pub fn set_relay_registry_address(env: &Env, address: &Address) {
+    env.storage()
+        .instance()
+        .set(&DataKey::RelayRegistryAddress, address);
 /// The `Address` of the token contract.
 ///
 /// # Panics

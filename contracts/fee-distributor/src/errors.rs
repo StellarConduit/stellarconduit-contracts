@@ -35,6 +35,8 @@ pub enum ContractError {
     /// Arithmetic overflow in fee calculation.
     Overflow = 8,
 
+    /// Fee distribution rejected because the relay node is not Active in the registry.
+    RelayNodeInactive = 11,
     /// Contract has already been initialized.
     AlreadyInitialized = 9,
 
