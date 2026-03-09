@@ -284,3 +284,114 @@ fn test_finalize_unstake_no_entry() {
 
     client.finalize_unstake(&node_addr);
 }
+
+#[test]
+fn test_reinstate_node_from_slashed_to_inactive_and_restake() {
+    let (env, client, _admin) = setup();
+
+    // Configure a token contract and set it as the staking token.
+    let token_admin = Address::generate(&env);
+    let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token_contract.address());
+    let token_address = token_client.address.clone();
+
+    env.as_contract(&client.address, || {
+        relay_registry::storage::set_token_address(&env, &token_address);
+    });
+
+    // Register a node and stake enough to become active.
+    let node_addr = Address::generate(&env);
+    let metadata = NodeMetadata {
+        region: String::from_str(&env, "us-east"),
+        capacity: 1000,
+        uptime_commitment: 99,
+    };
+
+    token_client.mint(&node_addr, &500);
+
+    client.register(&node_addr, &metadata);
+    client.stake(&node_addr, &200);
+
+    let active_node = client.get_node(&node_addr);
+    assert_eq!(active_node.status, NodeStatus::Active);
+    assert_eq!(active_node.stake, 200);
+
+    // Slash the node via the admin council.
+    client.slash(&node_addr, &String::from_str(&env, "misbehavior"));
+
+    let slashed_node = client.get_node(&node_addr);
+    assert_eq!(slashed_node.status, NodeStatus::Slashed);
+    assert_eq!(slashed_node.stake, 0);
+
+    // Reinstate the slashed node back to Inactive.
+    client.reinstate_node(&node_addr);
+
+    let reinstated_node = client.get_node(&node_addr);
+    assert_eq!(reinstated_node.status, NodeStatus::Inactive);
+    assert_eq!(reinstated_node.stake, 0);
+
+    // Stake again to become Active once more.
+    client.stake(&node_addr, &150);
+
+    let restaked_node = client.get_node(&node_addr);
+    assert_eq!(restaked_node.status, NodeStatus::Active);
+    assert_eq!(restaked_node.stake, 150);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #16)")] // NodeNotSlashed
+fn test_reinstate_node_when_inactive_fails() {
+    let (env, client, _admin) = setup();
+    let node_addr = Address::generate(&env);
+    let metadata = NodeMetadata {
+        region: String::from_str(&env, "us-east"),
+        capacity: 1000,
+        uptime_commitment: 99,
+    };
+
+    client.register(&node_addr, &metadata);
+
+    // Node is Inactive by default after registration; reinstatement should fail.
+    client.reinstate_node(&node_addr);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #16)")] // NodeNotSlashed
+fn test_reinstate_node_when_active_fails() {
+    let (env, client, _admin) = setup();
+
+    // Configure token for staking.
+    let token_admin = Address::generate(&env);
+    let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token_contract.address());
+    let token_address = token_client.address.clone();
+
+    env.as_contract(&client.address, || {
+        relay_registry::storage::set_token_address(&env, &token_address);
+    });
+
+    let node_addr = Address::generate(&env);
+    let metadata = NodeMetadata {
+        region: String::from_str(&env, "us-east"),
+        capacity: 1000,
+        uptime_commitment: 99,
+    };
+
+    token_client.mint(&node_addr, &500);
+
+    client.register(&node_addr, &metadata);
+    client.stake(&node_addr, &200);
+
+    // Node is Active; reinstatement should fail.
+    client.reinstate_node(&node_addr);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")] // NotRegistered
+fn test_reinstate_node_not_registered_fails() {
+    let (env, client, _admin) = setup();
+    let node_addr = Address::generate(&env);
+
+    // Node was never registered; should fail with NotRegistered.
+    client.reinstate_node(&node_addr);
+}
