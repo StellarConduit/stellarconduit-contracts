@@ -1,6 +1,9 @@
 use super::*;
 use crate::types::RelayChainProof;
-use soroban_sdk::{testutils::Address as _, Address, BytesN, Env};
+use soroban_sdk::{
+    testutils::{Address as _, Ledger},
+    Address, BytesN, Env,
+};
 
 fn setup_dispute<'a>(
     env: &'a Env,
