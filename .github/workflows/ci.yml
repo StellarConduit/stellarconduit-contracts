@@ -48,3 +48,69 @@ jobs:
       # Step 8: Build contracts
       - name: Build Contracts (WASM)
         run: stellar contract build
+
+  wasm-size-report:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Stellar CLI
+        uses: stellar/stellar-cli@v23.0.1
+
+      - name: Build contracts
+        run: stellar contract build
+
+      - name: Report WASM sizes
+        run: |
+          wasms=$(find \
+            target/wasm32v1-none/release \
+            target/wasm32-unknown-unknown/release \
+            -maxdepth 1 \
+            -name '*.wasm' \
+            -type f \
+            2>/dev/null | sort)
+          if [ -z "$wasms" ]; then
+            echo "ERROR: No WASM binaries found after build."
+            exit 1
+          fi
+
+          echo "## WASM Binary Sizes" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Contract | Size |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          for wasm in $wasms; do
+            name=$(basename "$wasm")
+            size=$(du -sh "$wasm" | cut -f1)
+            echo "| $name | $size |" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Enforce WASM size budget (100KB)
+        run: |
+          wasms=$(find \
+            target/wasm32v1-none/release \
+            target/wasm32-unknown-unknown/release \
+            -maxdepth 1 \
+            -name '*.wasm' \
+            -type f \
+            2>/dev/null | sort)
+          if [ -z "$wasms" ]; then
+            echo "ERROR: No WASM binaries found for size budget check."
+            exit 1
+          fi
+          for wasm in $wasms; do
+            size=$(stat -c%s "$wasm")
+            if [ "$size" -gt 102400 ]; then
+              echo "ERROR: $wasm exceeds 100KB size budget ($size bytes)"
+              exit 1
+            fi
+          done
