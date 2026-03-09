@@ -46,4 +46,6 @@ pub enum ContractError {
     InsufficientApprovals = 17,
     /// Council config is invalid (threshold > members, etc.).
     InvalidCouncilConfig = 18,
+    /// Caller must wait before raising another dispute (rate limit).
+    RateLimitExceeded = 19,
 }
