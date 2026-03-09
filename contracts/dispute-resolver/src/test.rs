@@ -201,6 +201,9 @@ fn test_cooldown_rate_limiting() {
         storage::set_public_key(&env, &initiator, &initiator_pk);
     });
 
+    // Advance ledger sequence to avoid initial cooldown blocking
+    env.ledger().with_mut(|l| l.sequence_number += 15);
+
     // First dispute should succeed
     let tx_id1 = BytesN::from_array(&env, &[1u8; 32]);
     let chain_hash = [2u8; 32];
