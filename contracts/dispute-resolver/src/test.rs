@@ -223,7 +223,10 @@ fn test_cooldown_rate_limiting() {
 
     let result = client.try_raise_dispute(&initiator, &tx_id2, &proof2);
     assert!(result.is_err());
-    assert_eq!(result.err().unwrap().unwrap(), ContractError::RateLimitExceeded);
+    assert_eq!(
+        result.err().unwrap().unwrap(),
+        ContractError::RateLimitExceeded
+    );
 }
 
 #[test]

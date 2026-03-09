@@ -22,12 +22,19 @@ fn setup<'a>() -> (Env, DisputeResolverContractClient<'a>, Address) {
         members,
         threshold: 1,
     };
-    
+
     // For testing, set bond and cooldown to 0 to disable rate limiting
     let token_address = Address::generate(&env);
     let treasury_address = Address::generate(&env);
-    client.initialize(&council, &100u32, &0i128, &0u32, &token_address, &treasury_address);
-    
+    client.initialize(
+        &council,
+        &100u32,
+        &0i128,
+        &0u32,
+        &token_address,
+        &treasury_address,
+    );
+
     (env, client, admin)
 }
 
@@ -96,7 +103,14 @@ fn test_initialize_success() {
 
     let token_address = Address::generate(&env);
     let treasury_address = Address::generate(&env);
-    client.initialize(&council, &100u32, &0i128, &0u32, &token_address, &treasury_address);
+    client.initialize(
+        &council,
+        &100u32,
+        &0i128,
+        &0u32,
+        &token_address,
+        &treasury_address,
+    );
 
     let active_window = env.as_contract(&client.address, || storage::get_resolution_window(&env));
     assert_eq!(active_window, 100);
@@ -113,10 +127,17 @@ fn test_initialize_already_initialized() {
         members,
         threshold: 1,
     };
-    
+
     let token_address = Address::generate(&env);
     let treasury_address = Address::generate(&env);
-    client.initialize(&council, &200u32, &0i128, &0u32, &token_address, &treasury_address);
+    client.initialize(
+        &council,
+        &200u32,
+        &0i128,
+        &0u32,
+        &token_address,
+        &treasury_address,
+    );
 }
 
 // ── raise_dispute() tests ─────────────────────────────────────────────────────
@@ -189,10 +210,17 @@ fn test_raise_dispute_auth_required() {
         members,
         threshold: 1,
     };
-    
+
     let token_address = Address::generate(&env);
     let treasury_address = Address::generate(&env);
-    client.initialize(&council, &100u32, &0i128, &0u32, &token_address, &treasury_address);
+    client.initialize(
+        &council,
+        &100u32,
+        &0i128,
+        &0u32,
+        &token_address,
+        &treasury_address,
+    );
 
     let (initiator, _, init_sk, _) = setup_disputants(&env, &client);
 
