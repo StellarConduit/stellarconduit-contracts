@@ -24,7 +24,25 @@
 //!
 //! implementation tracked in GitHub issue
 
-use soroban_sdk::{contracttype, Address, String};
+use soroban_sdk::{contracttype, Address, String, Vec};
+
+/// A multi-signature admin council requiring threshold approvals.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdminCouncil {
+    /// List of council member addresses (max 10)
+    pub members: Vec<Address>,
+    /// Minimum number of members required to authorize a sensitive action
+    pub threshold: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AllocationRecord {
+    pub program: String,
+    pub allocated: i128,
+    pub spent: i128,
+}
 
 /// Kind of treasury transaction entry.
 #[contracttype]
@@ -70,4 +88,18 @@ pub struct SpendingProgram {
     pub active: bool,
     /// Human-readable name/description.
     pub name: String,
+}
+
+/// Aggregate statistics for the treasury, used for dashboard integration.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TreasuryStats {
+    /// Current treasury token balance.
+    pub current_balance: i128,
+    /// Total tokens deposited over the treasury's lifetime.
+    pub lifetime_deposited: i128,
+    /// Total tokens withdrawn over the treasury's lifetime.
+    pub lifetime_withdrawn: i128,
+    /// Total tokens allocated to spending programs over the treasury's lifetime.
+    pub lifetime_allocated: i128,
 }

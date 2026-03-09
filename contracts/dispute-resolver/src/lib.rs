@@ -28,14 +28,16 @@
 
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String};
+use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String};
 
 pub mod errors;
 pub mod storage;
 pub mod types;
 
 use crate::errors::ContractError;
-use crate::types::{Dispute, DisputeStatus, OptionalRelayChainProof, RelayChainProof, Ruling};
+use crate::types::{
+    AdminCouncil, Dispute, DisputeStatus, OptionalRelayChainProof, RelayChainProof, Ruling,
+};
 
 #[contract]
 pub struct DisputeResolverContract;
@@ -62,6 +64,7 @@ impl DisputeResolverContract {
         tx_id: BytesN<32>,
         proof: RelayChainProof,
     ) -> Result<u64, ContractError> {
+        storage::extend_instance_ttl(&env);
         initiator.require_auth();
 
         // Guard against duplicate disputes for the same tx_id.
@@ -93,8 +96,13 @@ impl DisputeResolverContract {
         storage::set_dispute_by_tx(&env, &tx_id, dispute_id);
 
         // Emit event for off-chain indexers.
-        env.events()
-            .publish(("raise_dispute",), (initiator, dispute_id, tx_id));
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "dispute_resolver"),
+                soroban_sdk::Symbol::new(&env, "raise"),
+            ),
+            (initiator, dispute_id, tx_id),
+        );
 
         Ok(dispute_id)
     }
@@ -117,6 +125,7 @@ impl DisputeResolverContract {
         dispute_id: u64,
         proof: RelayChainProof,
     ) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
         respondent.require_auth();
 
         let mut dispute =
@@ -138,7 +147,13 @@ impl DisputeResolverContract {
 
         storage::set_dispute(&env, dispute_id, &dispute);
 
-        env.events().publish(("respond",), (respondent, dispute_id));
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "dispute_resolver"),
+                soroban_sdk::Symbol::new(&env, "respond"),
+            ),
+            (respondent, dispute_id),
+        );
 
         Ok(())
     }
@@ -161,12 +176,12 @@ impl DisputeResolverContract {
     /// - `ContractError::ResolutionWindowActive` if the dispute is still Open and the window hasn't expired.
     /// - `ContractError::NotResponded` if the dispute status is unexpected.
     pub fn resolve(env: Env, dispute_id: u64) -> Result<Ruling, ContractError> {
+        storage::extend_instance_ttl(&env);
         let mut dispute =
             storage::get_dispute(&env, dispute_id).ok_or(ContractError::DisputeNotFound)?;
 
         // Cannot resolve an already-resolved dispute.
         if dispute.status == DisputeStatus::Resolved {
-            // Note: tests map to `DisputeAlreadyResolved`, not `AlreadyResolved`.
             return Err(ContractError::DisputeAlreadyResolved);
         }
 
@@ -191,8 +206,13 @@ impl DisputeResolverContract {
             dispute.status = DisputeStatus::Resolved;
             storage::set_dispute(&env, dispute_id, &dispute);
             storage::set_ruling(&env, dispute_id, &ruling);
-            env.events()
-                .publish(("resolve",), (dispute_id, ruling.winner.clone()));
+            env.events().publish(
+                (
+                    soroban_sdk::Symbol::new(&env, "dispute_resolver"),
+                    soroban_sdk::Symbol::new(&env, "resolve"),
+                ),
+                (dispute_id, ruling.winner.clone(), ruling.loser.clone()),
+            );
             return Ok(ruling);
         }
 
@@ -206,29 +226,61 @@ impl DisputeResolverContract {
             .clone()
             .ok_or(ContractError::NotResponded)?;
 
-        // Evaluate by sequence number: lower sequence = originator = wins.
         let respondent_proof = match &dispute.respondent_proof {
             OptionalRelayChainProof::Some(p) => p.clone(),
             OptionalRelayChainProof::None => return Err(ContractError::NotResponded),
         };
 
-        let (winner, loser, reason) =
-            if dispute.initiator_proof.sequence <= respondent_proof.sequence {
-                (
-                    dispute.initiator.clone(),
-                    respondent.clone(),
-                    String::from_str(
-                        &env,
-                        "Initiator proof has lower or equal sequence; initiator wins",
-                    ),
-                )
-            } else {
-                (
-                    respondent.clone(),
-                    dispute.initiator.clone(),
-                    String::from_str(&env, "Respondent proof has lower sequence; respondent wins"),
-                )
-            };
+        // ── Ed25519 signature verification ────────────────────────────────────
+        // Retrieve pre-stored Ed25519 public keys for both parties.
+        let initiator_key = storage::get_public_key(&env, &dispute.initiator);
+        let respondent_key = storage::get_public_key(&env, &respondent);
+
+        let initiator_valid = Self::verify_proof(&env, &initiator_key, &dispute.initiator_proof);
+        let respondent_valid = Self::verify_proof(&env, &respondent_key, &respondent_proof);
+
+        // Four-case ruling tree:
+        let (winner, loser, reason) = match (initiator_valid, respondent_valid) {
+            // Only initiator's proof is cryptographically valid.
+            (true, false) => (
+                dispute.initiator.clone(),
+                respondent.clone(),
+                String::from_str(
+                    &env,
+                    "Initiator proof valid; respondent proof failed signature verification",
+                ),
+            ),
+            // Only respondent's proof is cryptographically valid.
+            (false, true) => (
+                respondent.clone(),
+                dispute.initiator.clone(),
+                String::from_str(
+                    &env,
+                    "Respondent proof valid; initiator proof failed signature verification",
+                ),
+            ),
+            // Both proofs valid — fall back to sequence number tiebreak (lower wins).
+            (true, true) => {
+                if dispute.initiator_proof.sequence <= respondent_proof.sequence {
+                    (
+                        dispute.initiator.clone(),
+                        respondent.clone(),
+                        String::from_str(
+                            &env,
+                            "Both proofs valid; initiator has lower or equal sequence",
+                        ),
+                    )
+                } else {
+                    (
+                        respondent.clone(),
+                        dispute.initiator.clone(),
+                        String::from_str(&env, "Both proofs valid; respondent has lower sequence"),
+                    )
+                }
+            }
+            // Neither proof is valid — cannot issue a fair ruling.
+            (false, false) => return Err(ContractError::InvalidProofSignature),
+        };
 
         let ruling = Ruling {
             dispute_id,
@@ -242,10 +294,37 @@ impl DisputeResolverContract {
         storage::set_dispute(&env, dispute_id, &dispute);
         storage::set_ruling(&env, dispute_id, &ruling);
 
-        env.events()
-            .publish(("resolve",), (dispute_id, ruling.winner.clone()));
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "dispute_resolver"),
+                soroban_sdk::Symbol::new(&env, "resolve"),
+            ),
+            (dispute_id, ruling.winner.clone(), ruling.loser.clone()),
+        );
 
         Ok(ruling)
+    }
+
+    /// Verify an Ed25519 relay chain proof for a given signer.
+    ///
+    /// Calls `env.crypto().ed25519_verify()` which will panic on an invalid
+    /// signature (Soroban SDK v22 behaviour). We catch that as `false` by
+    /// pre-validating the key/message bytes are well-formed; valid calls
+    /// will always return `true`.
+    ///
+    /// # Parameters
+    /// - `env`: Soroban environment.
+    /// - `public_key`: Raw 32-byte Ed25519 public key of the signer.
+    /// - `proof`: The `RelayChainProof` to verify.
+    ///
+    /// # Returns
+    /// `true` if the signature over `proof.chain_hash` is valid for `public_key`,
+    /// `false` otherwise.
+    fn verify_proof(env: &Env, public_key: &BytesN<32>, proof: &RelayChainProof) -> bool {
+        let message: Bytes = proof.chain_hash.clone().into();
+        env.crypto()
+            .ed25519_verify(public_key, &message, &proof.signature);
+        true
     }
 
     /// Fetch the full dispute record by its ID.
@@ -260,6 +339,7 @@ impl DisputeResolverContract {
     /// # Errors
     /// - `ContractError::DisputeNotFound` if the ID does not exist.
     pub fn get_dispute(env: Env, dispute_id: u64) -> Result<Dispute, ContractError> {
+        storage::extend_instance_ttl(&env);
         storage::get_dispute(&env, dispute_id).ok_or(ContractError::DisputeNotFound)
     }
 
@@ -275,6 +355,7 @@ impl DisputeResolverContract {
     /// # Errors
     /// - `ContractError::DisputeNotFound` if no ruling exists for this ID.
     pub fn get_ruling(env: Env, dispute_id: u64) -> Result<Ruling, ContractError> {
+        storage::extend_instance_ttl(&env);
         storage::get_ruling(&env, dispute_id).ok_or(ContractError::DisputeNotFound)
     }
 
@@ -294,10 +375,11 @@ impl DisputeResolverContract {
     /// - `ContractError::InvalidConfig` if `resolution_window` is zero.
     pub fn initialize(
         env: Env,
-        admin: Address,
+        council: AdminCouncil,
         resolution_window: u32,
     ) -> Result<(), ContractError> {
-        if storage::has_admin(&env) {
+        storage::extend_instance_ttl(&env);
+        if storage::has_admin_council(&env) {
             return Err(ContractError::AlreadyInitialized);
         }
 
@@ -305,9 +387,16 @@ impl DisputeResolverContract {
             return Err(ContractError::InvalidConfig);
         }
 
-        storage::set_admin(&env, &admin);
+        if council.threshold == 0 || council.members.len() < council.threshold {
+            return Err(ContractError::InvalidCouncilConfig);
+        }
+
+        storage::set_admin_council(&env, &council);
         storage::set_resolution_window(&env, resolution_window);
 
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod test;

@@ -1,45 +1,48 @@
-## feat: Implement SAC token transfers across relay-registry, fee-distributor, and treasury
-
-Closes #36
+## feat(storage): implement TTL extension across all contracts
 
 ### Summary
+- **Introduce shared TTL constants and helpers** in each contract's `storage.rs` to manage Soroban storage expiration (`LEDGER_BUMP_THRESHOLD` and `LEDGER_BUMP_AMOUNT` plus `extend_instance_ttl(&Env)`).
+- **Bump per-key persistent storage TTLs on access** by updating all `persistent()` read/write helpers to call `extend_ttl` whenever active data (e.g., relay registrations, disputes, earnings, treasury entries/programs) is loaded or modified.
+- **Extend instance storage TTL on every contract call** by invoking `storage::extend_instance_ttl(&env)` at the start of each public entrypoint, keeping global config/admin state alive as long as the contracts are used.
 
-Replaces all `// TODO: SAC transfer` comments with live `token::Client` calls using the Stellar Asset Contract (SAC) interface, wiring real on-chain token movements into the three affected contracts.
+### Details
+- **Relay Registry**
+  - Added TTL constants and `extend_instance_ttl` to `storage.rs`.
+  - Updated relay node and stake lock entry helpers to bump persistent TTL on both reads and writes.
+  - Call `storage::extend_instance_ttl(&env)` at the start of all public functions (`initialize`, `register`, `update_metadata`, `stake`, `unstake`, `finalize_unstake`, `slash`, `reinstate_node`, `get_node`, `is_active`).
 
-### Changes
+- **Fee Distributor**
+  - Added TTL constants and `extend_instance_ttl` to `storage.rs`.
+  - Updated `get_earnings`/`set_earnings` and `get_fee_entry`/`set_fee_entry` to extend per-key TTL whenever an `EarningsRecord` or `FeeEntry` is read or written.
+  - Call `storage::extend_instance_ttl(&env)` at the start of all public functions (`initialize`, `calculate_fee`, `distribute`, `claim`, `get_earnings`, `set_fee_rate`), ensuring the fee config and admin council instance state never expires.
 
-#### `contracts/relay-registry`
-- `storage.rs`: Added `DataKey::TokenAddress` variant and `get_token_address` / `set_token_address` helpers.
-- `lib.rs`: Added `use soroban_sdk::token;`. Implemented token transfers in:
-  - `stake()` — pulls `amount` tokens from `node_address` → contract
-  - `unstake()` — pushes `amount` tokens from contract → `node_address`
-  - The slashing-to-treasury transfer is left as a `TODO` (requires a separate treasury address mapping not in scope for this issue).
+- **Dispute Resolver**
+  - Added TTL constants and `extend_instance_ttl` to `storage.rs`.
+  - Updated dispute, ruling, tx→dispute mapping, and public key helpers to bump TTL on every persistent read/write:
+    - `get_dispute`/`set_dispute`
+    - `get_ruling`/`set_ruling`
+    - `get_dispute_by_tx`/`set_dispute_by_tx`
+    - `get_public_key`/`set_public_key`
+  - Call `storage::extend_instance_ttl(&env)` at the start of all public functions (`raise_dispute`, `respond`, `resolve`, `get_dispute`, `get_ruling`, `initialize`).
 
-#### `contracts/fee-distributor`
-- `types.rs`: Implemented `FeeEntry`, `EarningsRecord`, and `FeeConfig` structs (prerequisite stubs filled).
-- `errors.rs`: Implemented `ContractError` enum with all documented error codes.
-- `storage.rs`: Implemented all storage helpers: `get/set_fee_config`, `get/set_fee_entry`, `get/set_earnings`, `get/set_token_address`, `get/set_treasury_address`.
-- `lib.rs`: Added `use soroban_sdk::token;`. Implemented token transfers in:
-  - `distribute()` — pushes `treasury_share` from contract → treasury address
-  - `claim()` — pushes `payout` from contract → relay address
+- **Treasury**
+  - Added TTL constants and `extend_instance_ttl` to `storage.rs`.
+  - Updated all persistent history/allocation/program helpers to extend TTL on access:
+    - Entries: `get_entry`, `set_entry`, `append_entry`
+    - Allocations: `get_allocation`/`set_allocation`
+    - Programs: `get_spending_program`/`set_spending_program`
+  - Call `storage::extend_instance_ttl(&env)` at the start of all public functions (`get_balance`, `get_history`, `initialize`, `deposit`, `withdraw`, `create_program`, `update_program_budget`, `deactivate_program`, `get_program`, `allocate`, `get_treasury_stats`) so instance fields like admin council, token address, counters, and stats stay alive.
 
-#### `contracts/treasury`
-- `lib.rs`: Added `use soroban_sdk::token;`. Implemented token transfers in:
-  - `deposit()` — pulls `amount` from `from` → contract
-  - `withdraw()` — pushes `amount` from contract → `to`
-  - `allocate()` — token transfer commented out with `TODO`; `SpendingProgram` has no `recipient_address` field, so the destination is unknown at call time. Requires a follow-up to add recipient mapping.
-- `test.rs`: Updated all tests to register a `StellarAssetClient` token contract, mint balances, and set the token address in storage before exercising deposit/withdraw/allocate paths.
+### Rationale
+- Soroban does not keep storage forever; without explicit TTL bumps, active protocol data (relay registrations, disputes, earnings, treasury records) can expire and be garbage-collected.
+- This change centralizes TTL handling in the storage modules and ensures:
+  - **Per-key persistent entries** are kept alive as long as they are actively read or written.
+  - **Instance/global state** is kept alive as long as contracts continue to be invoked.
 
-### Testing
+### Testing / Verification
+- **Formatting & linting**
+  - `cargo fmt --all`
+  - `cargo clippy --all-targets --all-features -- -D warnings`
+- **Build (recommended to run locally)**
+  - `stellar contract build`
 
-```
-cargo test --workspace   # 11 passed; 0 failed
-cargo fmt --all          # no changes
-cargo clippy --all-targets --all-features -- -D warnings   # clean
-stellar contract build   # all 4 contracts compile to WASM
-```
-
-### Notes
-
-- The `fee-distributor` supporting file implementations (`types.rs`, `errors.rs`, `storage.rs`) were included here because those prerequisite stubs had not yet been merged. They follow the spec documented in each file's module doc comment.
-- The `relay-registry` and `fee-distributor` token / treasury address storage helpers will be superseded once the official prerequisite PRs land; the only true new surface area is the `token::Client::transfer()` calls in each contract function.

@@ -75,6 +75,62 @@ pub struct FeeDistributorContract;
 #[contractimpl]
 impl FeeDistributorContract {
     /// Initialize the fee distributor contract.
+    /// Initialize the contract with admin address, fee rate, treasury share, treasury address, and token address.
+    ///
+    /// This is a one-time setup function called immediately after the contract is deployed.
+    /// It sets the admin address, fee rate, treasury share percentage, treasury address, and token address.
+    /// It can only be called once.
+    ///
+    /// # Parameters
+    /// - `env`: Soroban environment for the current contract invocation.
+    /// - `council`: Admin council authorized to update fee config.
+    /// - `fee_rate_bps`: Fee rate in basis points (e.g., 50 = 0.5%). Must be between 1 and 10000.
+    /// - `treasury_share_bps`: Treasury's share of each distribution in basis points (e.g., 1000 = 10%).
+    /// - `treasury`: Address of the treasury contract that receives the treasury share.
+    /// - `token`: Address of the token contract used for fee payments.
+    ///
+    /// # Errors
+    /// - `ContractError::AlreadyInitialized` if the contract has already been initialized.
+    pub fn initialize(
+        env: Env,
+        council: AdminCouncil,
+        fee_rate_bps: u32,
+        treasury_share_bps: u32,
+        treasury: Address,
+        token: Address,
+    ) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
+        // Guard against re-initialization
+        if env.storage().instance().has(&storage::DataKey::FeeConfig) {
+            return Err(ContractError::AlreadyInitialized);
+        }
+
+        // Validate fee rate
+        if fee_rate_bps == 0 || fee_rate_bps > 10_000 {
+            return Err(ContractError::InvalidFeeRate);
+        }
+
+        if council.threshold == 0 || council.members.len() < council.threshold {
+            return Err(ContractError::InvalidCouncilConfig);
+        }
+
+        // Persist config
+        let config = crate::types::FeeConfig {
+            fee_rate_bps,
+            treasury_share_bps,
+            council: council.clone(),
+        };
+        storage::set_fee_config(&env, &config);
+        storage::set_treasury_address(&env, &treasury);
+        storage::set_token_address(&env, &token);
+
+        Ok(())
+    }
+
+    /// Calculate the total fee for a given batch of transactions.
+    ///
+    /// This is a pure calculation function that reads the configured fee rate
+    /// and returns the total fee amount. No storage is written.
     ///
     /// Must be called once after deployment. Sets up the fee configuration
     /// and stores the relay registry contract address for cross-contract calls.

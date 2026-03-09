@@ -56,4 +56,19 @@ pub enum ContractError {
 
     /// A provided numeric argument is invalid (zero or negative).
     InvalidAmount = 11,
+
+    /// Not enough council members authorized this action
+    InsufficientApprovals = 12,
+
+    /// Council config is invalid (threshold > members, etc.)
+    InvalidCouncilConfig = 13,
+
+    /// Caller does not have a pending unstake request.
+    NoPendingUnstake = 14,
+
+    /// Attempted withdrawal before the lock period elapsed.
+    LockPeriodActive = 15,
+
+    /// Cannot reinstate a node that is not currently slashed.
+    NodeNotSlashed = 16,
 }

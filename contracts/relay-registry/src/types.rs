@@ -19,7 +19,17 @@
 //!
 //! implementation tracked in GitHub issue
 
-use soroban_sdk::{contracttype, Address, String};
+use soroban_sdk::{contracttype, Address, String, Vec};
+
+/// A multi-signature admin council requiring threshold approvals.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdminCouncil {
+    /// List of council member addresses (max 10)
+    pub members: Vec<Address>,
+    /// Minimum number of members required to authorize a sensitive action
+    pub threshold: u32,
+}
 
 /// Represents the operational status of a relay node within the protocol.
 #[contracttype]
@@ -69,6 +79,8 @@ pub struct RelayNode {
 pub struct StakeEntry {
     /// The Stellar account address that initiated the unstake operation.
     pub address: Address,
+    /// The amount of tokens unbonded.
+    pub amount: i128,
     /// Ledger number when the unstaked tokens can be withdrawn.
     pub unlocks_at: u64,
 }

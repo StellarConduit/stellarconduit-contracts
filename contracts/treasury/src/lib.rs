@@ -34,13 +34,69 @@ pub mod storage;
 pub mod types;
 
 use crate::errors::ContractError;
-use crate::types::{EntryKind, TreasuryEntry};
+use crate::types::{AdminCouncil, EntryKind, SpendingProgram, TreasuryEntry, TreasuryStats};
+
+fn require_council_auth(env: &Env) {
+    let council = storage::get_admin_council(env);
+    let mut authorized = 0u32;
+    for member in council.members.iter() {
+        member.require_auth();
+        authorized += 1;
+        if authorized >= council.threshold {
+            break;
+        }
+    }
+
+    if authorized < council.threshold {
+        panic!("Insufficient approvals");
+    }
+}
 
 #[contract]
 pub struct TreasuryContract;
 
 #[contractimpl]
 impl TreasuryContract {
+    /// Returns the current treasury token balance.
+    ///
+    /// Public view function; never errors. Returns 0 if balance is unset.
+    pub fn get_balance(env: Env) -> i128 {
+        storage::extend_instance_ttl(&env);
+        storage::get_balance(&env)
+    }
+
+    /// Returns a specific history entry by its ID for auditing.
+    ///
+    /// Uses `ContractError::ProgramNotFound` when an entry is not found.
+    pub fn get_history(env: Env, entry_id: u64) -> Result<TreasuryEntry, ContractError> {
+        storage::extend_instance_ttl(&env);
+        storage::get_entry(&env, entry_id).ok_or(ContractError::ProgramNotFound)
+    }
+
+    /// One-time setup configuring the admin and token address.
+    ///
+    /// First caller wins; no auth required. Fails if already initialized.
+    pub fn initialize(
+        env: Env,
+        council: AdminCouncil,
+        token_address: Address,
+    ) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
+        if storage::has_admin_council(&env) {
+            return Err(ContractError::AlreadyInitialized);
+        }
+
+        if council.threshold == 0 || council.members.len() < council.threshold {
+            return Err(ContractError::InvalidCouncilConfig);
+        }
+
+        storage::set_admin_council(&env, &council);
+        storage::set_token_address(&env, &token_address);
+        storage::set_balance(&env, 0);
+
+        Ok(())
+    }
+
     /// Deposit funds into the protocol treasury.
     ///
     /// # Parameters
@@ -52,6 +108,7 @@ impl TreasuryContract {
     /// - `ContractError::InvalidAmount` if `amount` is zero or negative.
     /// - `ContractError::Overflow` if the balance arithmetic overflows.
     pub fn deposit(env: Env, from: Address, amount: i128) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
         from.require_auth();
 
         if amount <= 0 {
@@ -61,6 +118,14 @@ impl TreasuryContract {
         let balance = storage::get_balance(&env);
         let new_balance = balance.checked_add(amount).ok_or(ContractError::Overflow)?;
         storage::set_balance(&env, new_balance);
+
+        // Update lifetime stats
+        let mut stats = storage::get_stats(&env);
+        stats.lifetime_deposited = stats
+            .lifetime_deposited
+            .checked_add(amount)
+            .ok_or(ContractError::Overflow)?;
+        storage::set_stats(&env, &stats);
 
         let entry = TreasuryEntry {
             kind: EntryKind::Deposit,
@@ -76,7 +141,13 @@ impl TreasuryContract {
         let token = token::Client::new(&env, &token_address);
         token.transfer(&from, &env.current_contract_address(), &amount);
 
-        env.events().publish(("deposit",), (from.clone(), amount));
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "treasury"),
+                soroban_sdk::Symbol::new(&env, "deposit"),
+            ),
+            (from.clone(), amount),
+        );
 
         Ok(())
     }
@@ -99,8 +170,8 @@ impl TreasuryContract {
         amount: i128,
         memo: String,
     ) -> Result<(), ContractError> {
-        let admin = storage::get_admin(&env);
-        admin.require_auth();
+        storage::extend_instance_ttl(&env);
+        require_council_auth(&env);
 
         if amount <= 0 {
             return Err(ContractError::InvalidAmount);
@@ -114,12 +185,20 @@ impl TreasuryContract {
         let new_balance = balance.checked_sub(amount).ok_or(ContractError::Overflow)?;
         storage::set_balance(&env, new_balance);
 
+        // Update lifetime stats
+        let mut stats = storage::get_stats(&env);
+        stats.lifetime_withdrawn = stats
+            .lifetime_withdrawn
+            .checked_add(amount)
+            .ok_or(ContractError::Overflow)?;
+        storage::set_stats(&env, &stats);
+
         let entry = TreasuryEntry {
             kind: EntryKind::Withdrawal,
             amount,
-            actor: admin.clone(),
+            actor: env.current_contract_address(), // We record the contract executing since it's a multisig operation
             recipient: Some(to.clone()),
-            memo,
+            memo: memo.clone(),
             ledger: env.ledger().sequence() as u64,
         };
         storage::set_entry(&env, entry);
@@ -127,9 +206,114 @@ impl TreasuryContract {
         let token = token::Client::new(&env, &storage::get_token_address(&env));
         token.transfer(&env.current_contract_address(), &to, &amount);
 
-        env.events().publish(("withdraw",), (to.clone(), amount));
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "treasury"),
+                soroban_sdk::Symbol::new(&env, "withdraw"),
+            ),
+            (to.clone(), amount, memo),
+        );
 
         Ok(())
+    }
+
+    /// Create a new spending program with a specified budget.
+    ///
+    /// # Parameters
+    /// - `env`: Soroban environment.
+    /// - `name`: Name of the program (3-64 chars).
+    /// - `budget`: Initial budget for the program. Must be > 0.
+    pub fn create_program(env: Env, name: String, budget: i128) -> Result<u64, ContractError> {
+        storage::extend_instance_ttl(&env);
+        require_council_auth(&env);
+
+        if budget <= 0 {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        if name.len() < 3 || name.len() > 64 {
+            return Err(ContractError::InvalidProgramName);
+        }
+
+        let program_id = storage::increment_program_count(&env);
+
+        let program = SpendingProgram {
+            program_id,
+            budget,
+            spent: 0,
+            active: true,
+            name: name.clone(),
+        };
+
+        storage::set_spending_program(&env, program_id, program);
+
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "treasury"),
+                soroban_sdk::Symbol::new(&env, "create_program"),
+            ),
+            (program_id, name, budget),
+        );
+
+        Ok(program_id)
+    }
+
+    /// Update the budget of an existing spending program.
+    pub fn update_program_budget(
+        env: Env,
+        program_id: u64,
+        new_budget: i128,
+    ) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
+        require_council_auth(&env);
+
+        let mut program = storage::get_spending_program(&env, program_id)
+            .ok_or(ContractError::ProgramNotFound)?;
+
+        if new_budget < program.spent {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        program.budget = new_budget;
+        storage::set_spending_program(&env, program_id, program);
+
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "treasury"),
+                soroban_sdk::Symbol::new(&env, "update_budget"),
+            ),
+            (program_id, new_budget),
+        );
+
+        Ok(())
+    }
+
+    /// Deactivate a spending program.
+    pub fn deactivate_program(env: Env, program_id: u64) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
+        require_council_auth(&env);
+
+        let mut program = storage::get_spending_program(&env, program_id)
+            .ok_or(ContractError::ProgramNotFound)?;
+
+        program.active = false;
+        storage::set_spending_program(&env, program_id, program);
+
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "treasury"),
+                soroban_sdk::Symbol::new(&env, "deactivate_program"),
+            ),
+            (program_id,),
+        );
+
+        Ok(())
+    }
+
+    /// Get details of a spending program.
+    pub fn get_program(env: Env, program_id: u64) -> Result<SpendingProgram, ContractError> {
+        storage::extend_instance_ttl(&env);
+        storage::get_spending_program(&env, program_id).ok_or(ContractError::ProgramNotFound)
     }
 
     /// Allocate treasury funds to a spending program (admin only).
@@ -147,8 +331,8 @@ impl TreasuryContract {
     /// - `ContractError::InsufficientBalance` if treasury balance is too low.
     /// - `ContractError::Overflow` if arithmetic overflows.
     pub fn allocate(env: Env, program_id: u64, amount: i128) -> Result<(), ContractError> {
-        let admin = storage::get_admin(&env);
-        admin.require_auth();
+        storage::extend_instance_ttl(&env);
+        require_council_auth(&env);
 
         if amount <= 0 {
             return Err(ContractError::InvalidAmount);
@@ -180,10 +364,18 @@ impl TreasuryContract {
         let new_balance = balance.checked_sub(amount).ok_or(ContractError::Overflow)?;
         storage::set_balance(&env, new_balance);
 
+        // Update lifetime stats
+        let mut stats = storage::get_stats(&env);
+        stats.lifetime_allocated = stats
+            .lifetime_allocated
+            .checked_add(amount)
+            .ok_or(ContractError::Overflow)?;
+        storage::set_stats(&env, &stats);
+
         let entry = TreasuryEntry {
             kind: EntryKind::Allocation,
             amount,
-            actor: admin,
+            actor: env.current_contract_address(), // We record the contract executing since it's a multisig operation
             recipient: None,
             memo: String::from_str(&env, "allocation"),
             ledger: env.ledger().sequence() as u64,
@@ -201,7 +393,34 @@ impl TreasuryContract {
         // let token = token::Client::new(&env, &storage::get_token_address(&env));
         // token.transfer(&env.current_contract_address(), &program_recipient_address, &amount);
 
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "treasury"),
+                soroban_sdk::Symbol::new(&env, "allocate"),
+            ),
+            (program_id, amount),
+        );
+
         Ok(())
+    }
+
+    /// Returns aggregate statistics for the treasury.
+    ///
+    /// This is a read-only view function intended for dashboard integration.
+    /// Returns cumulative totals for deposits, withdrawals, and allocations.
+    ///
+    /// # Returns
+    /// - `TreasuryStats` struct containing:
+    ///   - `current_balance`: Current treasury token balance
+    ///   - `lifetime_deposited`: Total tokens deposited over the treasury's lifetime
+    ///   - `lifetime_withdrawn`: Total tokens withdrawn over the treasury's lifetime
+    ///   - `lifetime_allocated`: Total tokens allocated to spending programs
+    pub fn get_treasury_stats(env: Env) -> TreasuryStats {
+        storage::extend_instance_ttl(&env);
+        let mut stats = storage::get_stats(&env);
+        // current_balance is dynamic, fetch it fresh to ensure accuracy
+        stats.current_balance = storage::get_balance(&env);
+        stats
     }
 }
 

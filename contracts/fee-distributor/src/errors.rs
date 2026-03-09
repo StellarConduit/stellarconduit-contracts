@@ -37,4 +37,12 @@ pub enum ContractError {
 
     /// Fee distribution rejected because the relay node is not Active in the registry.
     RelayNodeInactive = 11,
+    /// Contract has already been initialized.
+    AlreadyInitialized = 9,
+
+    /// Not enough council members authorized this action.
+    InsufficientApprovals = 10,
+
+    /// Council config is invalid (threshold > members, etc.).
+    InvalidCouncilConfig = 11,
 }
