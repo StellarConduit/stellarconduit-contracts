@@ -6,7 +6,7 @@ extern crate std;
 
 use soroban_sdk::{
     testutils::{Address as _, Events as _},
-    Address, Env, String,
+    Address, BytesN, Env, String,
 };
 
 // The contract-under-test.

@@ -166,3 +166,18 @@ fn test_resolve_both_invalid() {
     let result = client.try_resolve(&dispute_id);
     assert!(result.is_err());
 }
+
+#[test]
+fn test_version() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(DisputeResolverContract, ());
+    let client = DisputeResolverContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &100);
+
+    // Test version returns 1
+    assert_eq!(client.version(), 1);
+}
