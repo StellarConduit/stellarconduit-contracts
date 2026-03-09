@@ -63,6 +63,23 @@
 
 <!-- TODO -->
 
+#### `reinstate_node(node_address: Address) -> Result<(), ContractError>`
+
+- **Purpose**: Allows the admin council to reinstate a relay node that was previously slashed after a successful governance appeal.
+- **Authorization**: Requires admin council authorization; each call must satisfy the council's threshold via `require_council_auth`.
+- **Preconditions**:
+  - The node with `node_address` MUST be registered in the registry.
+  - The node's current status MUST be `NodeStatus::Slashed`.
+- **Postconditions**:
+  - The node's status is set to `NodeStatus::Inactive`.
+  - The node's `last_active` timestamp is updated to the current ledger timestamp.
+  - The node's `stake` remains `0` (slashed stake is not restored); the node must call `stake` again to become `Active`.
+- **Events**:
+  - Emits a `reinstate_node` event with `(node_address)` as the data payload.
+- **Error Cases**:
+  - `ContractError::NotRegistered` — if the node does not exist in the registry.
+  - `ContractError::NodeNotSlashed` — if the node is `Active` or `Inactive` and therefore not eligible for reinstatement.
+
 ### Events
 
 <!-- TODO: List all events emitted by this contract (topic, data). -->

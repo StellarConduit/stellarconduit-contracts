@@ -451,6 +451,51 @@ impl RelayRegistryContract {
 
         Ok(())
     }
+
+    /// Reinstate a previously slashed relay node after a successful governance appeal.
+    ///
+    /// This function allows the admin council to move a node from `Slashed` back to
+    /// `Inactive` status after an off-chain appeals process determines that the slash
+    /// was unwarranted or due to non-malicious causes (e.g., hardware failure).
+    ///
+    /// The node does **not** regain any previously slashed stake; it must call `stake`
+    /// again to become `Active`.
+    ///
+    /// # Parameters
+    /// - `env`: Soroban environment for the current contract invocation.
+    /// - `node_address`: Address of the relay node to reinstate.
+    ///
+    /// # Errors
+    /// - `ContractError::NotRegistered` if the node is not in the registry.
+    /// - `ContractError::NodeNotSlashed` if the node is not currently slashed.
+    pub fn reinstate_node(env: Env, node_address: Address) -> Result<(), ContractError> {
+        // Only the admin council may reinstate a slashed node.
+        require_council_auth(&env);
+
+        let mut node =
+            storage::get_node(&env, &node_address).ok_or(ContractError::NotRegistered)?;
+
+        // Reinstatement is only valid for nodes that are currently slashed.
+        if !matches!(node.status, NodeStatus::Slashed) {
+            return Err(ContractError::NodeNotSlashed);
+        }
+
+        // Move the node back to Inactive; stake remains at 0.
+        node.status = NodeStatus::Inactive;
+        node.last_active = env.ledger().timestamp();
+
+        storage::set_node(&env, &node_address, &node);
+
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "relay_registry"),
+                soroban_sdk::Symbol::new(&env, "reinstate_node"),
+            ),
+            (node_address.clone(),),
+        );
+
+        Ok(())
+    }
     /// Retrieves a registered relay node's details.
     ///
     /// This is a view-only function that returns the `RelayNode` struct
