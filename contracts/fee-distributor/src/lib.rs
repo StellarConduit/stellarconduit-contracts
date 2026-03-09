@@ -27,7 +27,7 @@
 
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env};
+use soroban_sdk::{contract, contractimpl, token, Address, Env, IntoVal};
 
 pub mod errors;
 pub mod storage;
@@ -37,34 +37,53 @@ pub mod types;
 mod test;
 
 use crate::errors::ContractError;
+use crate::types::AdminCouncil;
+
+fn require_council_auth(_env: &Env, council: &AdminCouncil) {
+    let mut authorized = 0u32;
+    for member in council.members.iter() {
+        member.require_auth();
+        authorized += 1;
+        if authorized >= council.threshold {
+            break;
+        }
+    }
+
+    if authorized < council.threshold {
+        panic!("Insufficient approvals");
+    }
+}
 
 #[contract]
 pub struct FeeDistributorContract;
 
 #[contractimpl]
 impl FeeDistributorContract {
-    /// Initialize the contract with admin address, fee rate, treasury share, and treasury address.
+    /// Initialize the contract with admin address, fee rate, treasury share, treasury address, and token address.
     ///
     /// This is a one-time setup function called immediately after the contract is deployed.
-    /// It sets the admin address, fee rate, treasury share percentage, and treasury address.
+    /// It sets the admin address, fee rate, treasury share percentage, treasury address, and token address.
     /// It can only be called once.
     ///
     /// # Parameters
     /// - `env`: Soroban environment for the current contract invocation.
-    /// - `admin`: Address of the admin account authorized to update fee config.
+    /// - `council`: Admin council authorized to update fee config.
     /// - `fee_rate_bps`: Fee rate in basis points (e.g., 50 = 0.5%). Must be between 1 and 10000.
     /// - `treasury_share_bps`: Treasury's share of each distribution in basis points (e.g., 1000 = 10%).
     /// - `treasury`: Address of the treasury contract that receives the treasury share.
+    /// - `token`: Address of the token contract used for fee payments.
     ///
     /// # Errors
     /// - `ContractError::AlreadyInitialized` if the contract has already been initialized.
     pub fn initialize(
         env: Env,
-        admin: Address,
+        council: AdminCouncil,
         fee_rate_bps: u32,
         treasury_share_bps: u32,
         treasury: Address,
+        token: Address,
     ) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
         // Guard against re-initialization
         if env.storage().instance().has(&storage::DataKey::FeeConfig) {
             return Err(ContractError::AlreadyInitialized);
@@ -75,14 +94,19 @@ impl FeeDistributorContract {
             return Err(ContractError::InvalidFeeRate);
         }
 
+        if council.threshold == 0 || council.members.len() < council.threshold {
+            return Err(ContractError::InvalidCouncilConfig);
+        }
+
         // Persist config
         let config = crate::types::FeeConfig {
             fee_rate_bps,
             treasury_share_bps,
-            admin: admin.clone(),
+            council: council.clone(),
         };
         storage::set_fee_config(&env, &config);
         storage::set_treasury_address(&env, &treasury);
+        storage::set_token_address(&env, &token);
 
         Ok(())
     }
@@ -109,6 +133,7 @@ impl FeeDistributorContract {
     /// - `ContractError::InvalidBatchSize` if `batch_size` is zero.
     /// - `ContractError::Overflow` if the calculation overflows.
     pub fn calculate_fee(env: Env, batch_size: u32) -> Result<i128, ContractError> {
+        storage::extend_instance_ttl(&env);
         if batch_size == 0 {
             return Err(ContractError::InvalidBatchSize);
         }
@@ -128,7 +153,8 @@ impl FeeDistributorContract {
     ///
     /// This function calculates the fee, credits the relay node's earnings,
     /// allocates the protocol treasury share, and permanently records the
-    /// distribution event.
+    /// distribution event. The treasury share is automatically transferred
+    /// to the treasury contract via cross-contract call.
     ///
     /// # Parameters
     /// - `env`: Soroban environment.
@@ -140,12 +166,14 @@ impl FeeDistributorContract {
     /// - `ContractError::BatchAlreadyDistributed` if `batch_id` has already been processed.
     /// - `ContractError::InvalidBatchSize` if `batch_size` is zero.
     /// - `ContractError::Overflow` if fee/split calculation overflows.
+    /// - `ContractError::TreasuryTransferFailed` if the treasury deposit fails.
     pub fn distribute(
         env: Env,
         relay_address: Address,
         batch_id: u64,
         batch_size: u32,
     ) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
         if storage::get_fee_entry(&env, batch_id).is_some() {
             return Err(ContractError::BatchAlreadyDistributed);
         }
@@ -184,12 +212,43 @@ impl FeeDistributorContract {
         };
         storage::set_fee_entry(&env, batch_id, &entry);
 
+        // Transfer treasury share to treasury contract
+        if treasury_share > 0 {
+            let treasury_addr = storage::get_treasury_address(&env);
+            let token_addr = storage::get_token_address(&env);
+            let token_client = token::Client::new(&env, &token_addr);
+
+            token_client.transfer(
+                &env.current_contract_address(),
+                &treasury_addr,
+                &treasury_share,
+            );
+
+            // Call treasury.deposit() via cross-contract invocation
+            env.invoke_contract::<()>(
+                &treasury_addr,
+                &soroban_sdk::Symbol::new(&env, "deposit"),
+                soroban_sdk::vec![
+                    &env,
+                    env.current_contract_address().into_val(&env),
+                    treasury_share.into_val(&env)
+                ],
+            );
+        }
+
         env.events().publish(
-            ("distribute",),
-            (relay_address.clone(), batch_id, relay_payout),
+            (
+                soroban_sdk::Symbol::new(&env, "fee_distributor"),
+                soroban_sdk::Symbol::new(&env, "distribute"),
+            ),
+            (
+                relay_address.clone(),
+                batch_id,
+                relay_payout,
+                treasury_share,
+            ),
         );
 
-        // TODO: SAC transfer treasury_share to treasury
         Ok(())
     }
 
@@ -210,6 +269,7 @@ impl FeeDistributorContract {
     /// - `ContractError::NothingToClaim` if the relay node has no unclaimed earnings.
     /// - `ContractError::Overflow` if the arithmetic for updating `total_claimed` overflows.
     pub fn claim(env: Env, relay_address: Address) -> Result<i128, ContractError> {
+        storage::extend_instance_ttl(&env);
         relay_address.require_auth();
 
         let mut record = storage::get_earnings(&env, &relay_address);
@@ -228,8 +288,13 @@ impl FeeDistributorContract {
 
         storage::set_earnings(&env, &relay_address, &record);
 
-        env.events()
-            .publish(("claim",), (relay_address.clone(), payout));
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "fee_distributor"),
+                soroban_sdk::Symbol::new(&env, "claim"),
+            ),
+            (relay_address.clone(), payout),
+        );
 
         // TODO: SAC transfer payout to relay_address
         Ok(payout)
@@ -248,6 +313,7 @@ impl FeeDistributorContract {
     /// # Returns
     /// An `EarningsRecord` containing the relay node's fee history.
     pub fn get_earnings(env: Env, relay_address: Address) -> crate::types::EarningsRecord {
+        storage::extend_instance_ttl(&env);
         storage::get_earnings(&env, &relay_address)
     }
 
@@ -264,9 +330,10 @@ impl FeeDistributorContract {
     /// - Auth error if caller is not the admin.
     /// - `ContractError::InvalidFeeRate` if the rate is 0 or greater than 10000.
     pub fn set_fee_rate(env: Env, new_fee_rate_bps: u32) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
         let mut config = storage::get_fee_config(&env);
 
-        config.admin.require_auth();
+        require_council_auth(&env, &config.council);
 
         if new_fee_rate_bps == 0 || new_fee_rate_bps > 10_000 {
             return Err(ContractError::InvalidFeeRate);
@@ -275,7 +342,13 @@ impl FeeDistributorContract {
         config.fee_rate_bps = new_fee_rate_bps;
         storage::set_fee_config(&env, &config);
 
-        env.events().publish(("set_fee_rate",), (new_fee_rate_bps,));
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "fee_distributor"),
+                soroban_sdk::Symbol::new(&env, "set_fee_rate"),
+            ),
+            (new_fee_rate_bps,),
+        );
 
         Ok(())
     }

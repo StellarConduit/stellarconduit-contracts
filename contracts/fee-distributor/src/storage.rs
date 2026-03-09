@@ -10,6 +10,17 @@ use soroban_sdk::{contracttype, Address, Env};
 
 use crate::types::{EarningsRecord, FeeConfig, FeeEntry};
 
+// Bump by ~30 days (assuming ~5 seconds per ledger)
+const LEDGER_BUMP_AMOUNT: u32 = 518_400;
+// Bump if remaining life is less than ~15 days
+const LEDGER_BUMP_THRESHOLD: u32 = 259_200;
+
+pub fn extend_instance_ttl(env: &Env) {
+    env.storage()
+        .instance()
+        .extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
+}
+
 /// Storage key enum for the Fee Distributor contract.
 ///
 /// All storage keys are defined here to ensure type safety and prevent
@@ -26,6 +37,8 @@ pub enum DataKey {
     FeeConfig,
     /// Stores the treasury contract address.
     TreasuryAddress,
+    /// Stores the token contract address.
+    TokenAddress,
 }
 
 /// Load the earnings record for a relay node. Returns a zeroed record if not found.
@@ -38,14 +51,19 @@ pub enum DataKey {
 /// An `EarningsRecord` with the relay node's earnings data, or a zeroed record
 /// if no earnings have been recorded for this address yet.
 pub fn get_earnings(env: &Env, address: &Address) -> EarningsRecord {
-    env.storage()
-        .persistent()
-        .get(&DataKey::Earnings(address.clone()))
-        .unwrap_or(EarningsRecord {
+    let key = DataKey::Earnings(address.clone());
+    if let Some(record) = env.storage().persistent().get::<_, EarningsRecord>(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
+        record
+    } else {
+        EarningsRecord {
             total_earned: 0,
             total_claimed: 0,
             unclaimed: 0,
-        })
+        }
+    }
 }
 
 /// Persist an updated earnings record for a relay node.
@@ -55,9 +73,11 @@ pub fn get_earnings(env: &Env, address: &Address) -> EarningsRecord {
 /// - `address`: Address of the relay node.
 /// - `record`: The earnings record to store.
 pub fn set_earnings(env: &Env, address: &Address, record: &EarningsRecord) {
+    let key = DataKey::Earnings(address.clone());
+    env.storage().persistent().set(&key, record);
     env.storage()
         .persistent()
-        .set(&DataKey::Earnings(address.clone()), record);
+        .extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
 }
 
 /// Load a fee entry by batch ID. Returns None if not found.
@@ -70,7 +90,15 @@ pub fn set_earnings(env: &Env, address: &Address, record: &EarningsRecord) {
 /// An `Option<FeeEntry>` containing the fee distribution record if found,
 /// or `None` if no entry exists for this batch ID.
 pub fn get_fee_entry(env: &Env, batch_id: u64) -> Option<FeeEntry> {
-    env.storage().persistent().get(&DataKey::FeeEntry(batch_id))
+    let key = DataKey::FeeEntry(batch_id);
+    if let Some(entry) = env.storage().persistent().get::<_, FeeEntry>(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
+        Some(entry)
+    } else {
+        None
+    }
 }
 
 /// Persist a new fee distribution entry.
@@ -80,9 +108,11 @@ pub fn get_fee_entry(env: &Env, batch_id: u64) -> Option<FeeEntry> {
 /// - `batch_id`: Unique identifier of the transaction batch.
 /// - `entry`: The fee entry to store.
 pub fn set_fee_entry(env: &Env, batch_id: u64, entry: &FeeEntry) {
+    let key = DataKey::FeeEntry(batch_id);
+    env.storage().persistent().set(&key, entry);
     env.storage()
         .persistent()
-        .set(&DataKey::FeeEntry(batch_id), entry);
+        .extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
 }
 
 /// Load the global fee configuration.
@@ -137,4 +167,32 @@ pub fn set_treasury_address(env: &Env, address: &Address) {
     env.storage()
         .instance()
         .set(&DataKey::TreasuryAddress, address);
+}
+
+/// Load the token contract address.
+///
+/// # Parameters
+/// - `env`: Soroban environment.
+///
+/// # Returns
+/// The `Address` of the token contract.
+///
+/// # Panics
+/// Panics if the token address has not been initialized.
+pub fn get_token_address(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&DataKey::TokenAddress)
+        .expect("token address not initialized")
+}
+
+/// Set the token contract address.
+///
+/// # Parameters
+/// - `env`: Soroban environment.
+/// - `address`: The token contract address to store.
+pub fn set_token_address(env: &Env, address: &Address) {
+    env.storage()
+        .instance()
+        .set(&DataKey::TokenAddress, address);
 }

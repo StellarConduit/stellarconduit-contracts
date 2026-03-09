@@ -2,7 +2,17 @@
 //!
 //! Defines all data structures used by the Fee Distributor contract.
 
-use soroban_sdk::{contracttype, Address};
+use soroban_sdk::{contracttype, Address, Vec};
+
+/// A multi-signature admin council requiring threshold approvals.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdminCouncil {
+    /// List of council member addresses (max 10)
+    pub members: Vec<Address>,
+    /// Minimum number of members required to authorize a sensitive action
+    pub threshold: u32,
+}
 
 /// A record of a single fee distribution event.
 ///
@@ -53,6 +63,6 @@ pub struct FeeConfig {
     pub fee_rate_bps: u32,
     /// Treasury's share of each distribution in basis points.
     pub treasury_share_bps: u32,
-    /// Address authorized to update fee config via `set_fee_rate()`.
-    pub admin: Address,
+    /// Council authorized to update fee config via `set_fee_rate()`.
+    pub council: AdminCouncil,
 }

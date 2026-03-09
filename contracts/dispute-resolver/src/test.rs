@@ -15,7 +15,13 @@ fn setup_dispute<'a>(
     let client = DisputeResolverContractClient::new(env, &contract_id);
 
     let admin = Address::generate(env);
-    client.initialize(&admin, &100);
+    let mut members = soroban_sdk::Vec::new(env);
+    members.push_back(admin.clone());
+    let council = crate::types::AdminCouncil {
+        members,
+        threshold: 1,
+    };
+    client.initialize(&council, &100);
 
     let initiator = Address::generate(env);
     let respondent = Address::generate(env);

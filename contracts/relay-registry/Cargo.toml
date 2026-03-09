@@ -8,6 +8,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+ed25519-dalek = { version = "2.2.0", default-features = false }
 soroban-sdk = { workspace = true }
 
 [dev-dependencies]

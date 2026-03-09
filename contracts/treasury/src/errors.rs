@@ -41,4 +41,13 @@ pub enum ContractError {
 
     /// Allocation would exceed program budget.
     ProgramOverBudget = 12,
+
+    /// Not enough council members authorized this action.
+    InsufficientApprovals = 13,
+
+    /// Council config is invalid (threshold > members, etc.).
+    InvalidCouncilConfig = 14,
+
+    /// Program name length is out of bounds.
+    InvalidProgramName = 15,
 }

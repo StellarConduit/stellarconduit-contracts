@@ -24,6 +24,17 @@ use soroban_sdk::{contracttype, Address, BytesN, Env};
 
 use crate::types::{Dispute, Ruling};
 
+// Bump by ~30 days (assuming ~5 seconds per ledger)
+const LEDGER_BUMP_AMOUNT: u32 = 518_400;
+// Bump if remaining life is less than ~15 days
+const LEDGER_BUMP_THRESHOLD: u32 = 259_200;
+
+pub fn extend_instance_ttl(env: &Env) {
+    env.storage()
+        .instance()
+        .extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
+}
+
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
@@ -31,7 +42,7 @@ pub enum DataKey {
     DisputeCount,
     Ruling(u64),
     ResolutionWindow,
-    Admin,
+    AdminCouncil,
     TxDispute(BytesN<32>),
     /// Stores the raw 32-byte Ed25519 public key for an Address.
     PublicKey(Address),
@@ -39,16 +50,24 @@ pub enum DataKey {
 
 /// Load a dispute by its ID. Returns None if not found.
 pub fn get_dispute(env: &Env, dispute_id: u64) -> Option<Dispute> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::Dispute(dispute_id))
+    let key = DataKey::Dispute(dispute_id);
+    if let Some(dispute) = env.storage().persistent().get::<_, Dispute>(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
+        Some(dispute)
+    } else {
+        None
+    }
 }
 
 /// Persist an updated dispute record to storage.
 pub fn set_dispute(env: &Env, dispute_id: u64, dispute: &Dispute) {
+    let key = DataKey::Dispute(dispute_id);
+    env.storage().persistent().set(&key, dispute);
     env.storage()
         .persistent()
-        .set(&DataKey::Dispute(dispute_id), dispute);
+        .extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
 }
 
 /// Get the current dispute count. Returns 0 if none exist.
@@ -69,14 +88,24 @@ pub fn get_next_dispute_id(env: &Env) -> u64 {
 
 /// Load a ruling by the dispute ID. Returns None if no ruling exists.
 pub fn get_ruling(env: &Env, dispute_id: u64) -> Option<Ruling> {
-    env.storage().persistent().get(&DataKey::Ruling(dispute_id))
+    let key = DataKey::Ruling(dispute_id);
+    if let Some(ruling) = env.storage().persistent().get::<_, Ruling>(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
+        Some(ruling)
+    } else {
+        None
+    }
 }
 
 /// Persist a final ruling to storage.
 pub fn set_ruling(env: &Env, dispute_id: u64, ruling: &Ruling) {
+    let key = DataKey::Ruling(dispute_id);
+    env.storage().persistent().set(&key, ruling);
     env.storage()
         .persistent()
-        .set(&DataKey::Ruling(dispute_id), ruling);
+        .extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
 }
 
 /// Get the resolution window in ledgers.
@@ -94,46 +123,62 @@ pub fn set_resolution_window(env: &Env, window_ledgers: u32) {
         .set(&DataKey::ResolutionWindow, &window_ledgers);
 }
 
-/// Check if the admin address is set.
-pub fn has_admin(env: &Env) -> bool {
-    env.storage().instance().has(&DataKey::Admin)
+/// Check if the admin council is set.
+pub fn has_admin_council(env: &Env) -> bool {
+    env.storage().instance().has(&DataKey::AdminCouncil)
 }
 
-/// Get the admin address.
-pub fn get_admin(env: &Env) -> Address {
+/// Get the admin council.
+pub fn get_admin_council(env: &Env) -> crate::types::AdminCouncil {
     env.storage()
         .instance()
-        .get(&DataKey::Admin)
-        .expect("admin not set")
+        .get(&DataKey::AdminCouncil)
+        .expect("admin council not set")
 }
 
-/// Set the admin address.
-pub fn set_admin(env: &Env, admin: &Address) {
-    env.storage().instance().set(&DataKey::Admin, admin);
+/// Set the admin council.
+pub fn set_admin_council(env: &Env, council: &crate::types::AdminCouncil) {
+    env.storage()
+        .instance()
+        .set(&DataKey::AdminCouncil, council);
 }
 
 /// Load the dispute ID associated with a tx_id. Returns None if none exists.
 pub fn get_dispute_by_tx(env: &Env, tx_id: &BytesN<32>) -> Option<u64> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::TxDispute(tx_id.clone()))
+    let key = DataKey::TxDispute(tx_id.clone());
+    if let Some(id) = env.storage().persistent().get::<_, u64>(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
+        Some(id)
+    } else {
+        None
+    }
 }
 
 /// Record that a given tx_id maps to a specific dispute_id.
 pub fn set_dispute_by_tx(env: &Env, tx_id: &BytesN<32>, dispute_id: u64) {
+    let key = DataKey::TxDispute(tx_id.clone());
+    env.storage().persistent().set(&key, &dispute_id);
     env.storage()
         .persistent()
-        .set(&DataKey::TxDispute(tx_id.clone()), &dispute_id);
+        .extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
 }
 
 /// Load the raw 32-byte Ed25519 public key for an address.
 ///
 /// Panics if the key has not been registered via `set_public_key`.
 pub fn get_public_key(env: &Env, address: &Address) -> BytesN<32> {
+    let key = DataKey::PublicKey(address.clone());
+    let pk = env
+        .storage()
+        .persistent()
+        .get::<_, BytesN<32>>(&key)
+        .expect("public key not registered for address");
     env.storage()
         .persistent()
-        .get(&DataKey::PublicKey(address.clone()))
-        .expect("public key not registered for address")
+        .extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
+    pk
 }
 
 /// Register the raw 32-byte Ed25519 public key for an address.
@@ -141,7 +186,9 @@ pub fn get_public_key(env: &Env, address: &Address) -> BytesN<32> {
 /// Must be called before `raise_dispute` or `respond` so that `resolve`
 /// can perform signature verification.
 pub fn set_public_key(env: &Env, address: &Address, public_key: &BytesN<32>) {
+    let key = DataKey::PublicKey(address.clone());
+    env.storage().persistent().set(&key, public_key);
     env.storage()
         .persistent()
-        .set(&DataKey::PublicKey(address.clone()), public_key);
+        .extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
 }

@@ -35,7 +35,9 @@ pub mod storage;
 pub mod types;
 
 use crate::errors::ContractError;
-use crate::types::{Dispute, DisputeStatus, OptionalRelayChainProof, RelayChainProof, Ruling};
+use crate::types::{
+    AdminCouncil, Dispute, DisputeStatus, OptionalRelayChainProof, RelayChainProof, Ruling,
+};
 
 #[contract]
 pub struct DisputeResolverContract;
@@ -62,6 +64,7 @@ impl DisputeResolverContract {
         tx_id: BytesN<32>,
         proof: RelayChainProof,
     ) -> Result<u64, ContractError> {
+        storage::extend_instance_ttl(&env);
         initiator.require_auth();
 
         // Guard against duplicate disputes for the same tx_id.
@@ -93,8 +96,13 @@ impl DisputeResolverContract {
         storage::set_dispute_by_tx(&env, &tx_id, dispute_id);
 
         // Emit event for off-chain indexers.
-        env.events()
-            .publish(("raise_dispute",), (initiator, dispute_id, tx_id));
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "dispute_resolver"),
+                soroban_sdk::Symbol::new(&env, "raise"),
+            ),
+            (initiator, dispute_id, tx_id),
+        );
 
         Ok(dispute_id)
     }
@@ -117,6 +125,7 @@ impl DisputeResolverContract {
         dispute_id: u64,
         proof: RelayChainProof,
     ) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
         respondent.require_auth();
 
         let mut dispute =
@@ -138,7 +147,13 @@ impl DisputeResolverContract {
 
         storage::set_dispute(&env, dispute_id, &dispute);
 
-        env.events().publish(("respond",), (respondent, dispute_id));
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "dispute_resolver"),
+                soroban_sdk::Symbol::new(&env, "respond"),
+            ),
+            (respondent, dispute_id),
+        );
 
         Ok(())
     }
@@ -161,6 +176,7 @@ impl DisputeResolverContract {
     /// - `ContractError::ResolutionWindowActive` if the dispute is still Open and the window hasn't expired.
     /// - `ContractError::NotResponded` if the dispute status is unexpected.
     pub fn resolve(env: Env, dispute_id: u64) -> Result<Ruling, ContractError> {
+        storage::extend_instance_ttl(&env);
         let mut dispute =
             storage::get_dispute(&env, dispute_id).ok_or(ContractError::DisputeNotFound)?;
 
@@ -190,8 +206,13 @@ impl DisputeResolverContract {
             dispute.status = DisputeStatus::Resolved;
             storage::set_dispute(&env, dispute_id, &dispute);
             storage::set_ruling(&env, dispute_id, &ruling);
-            env.events()
-                .publish(("resolve",), (dispute_id, ruling.winner.clone()));
+            env.events().publish(
+                (
+                    soroban_sdk::Symbol::new(&env, "dispute_resolver"),
+                    soroban_sdk::Symbol::new(&env, "resolve"),
+                ),
+                (dispute_id, ruling.winner.clone(), ruling.loser.clone()),
+            );
             return Ok(ruling);
         }
 
@@ -273,8 +294,13 @@ impl DisputeResolverContract {
         storage::set_dispute(&env, dispute_id, &dispute);
         storage::set_ruling(&env, dispute_id, &ruling);
 
-        env.events()
-            .publish(("resolve",), (dispute_id, ruling.winner.clone()));
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "dispute_resolver"),
+                soroban_sdk::Symbol::new(&env, "resolve"),
+            ),
+            (dispute_id, ruling.winner.clone(), ruling.loser.clone()),
+        );
 
         Ok(ruling)
     }
@@ -313,6 +339,7 @@ impl DisputeResolverContract {
     /// # Errors
     /// - `ContractError::DisputeNotFound` if the ID does not exist.
     pub fn get_dispute(env: Env, dispute_id: u64) -> Result<Dispute, ContractError> {
+        storage::extend_instance_ttl(&env);
         storage::get_dispute(&env, dispute_id).ok_or(ContractError::DisputeNotFound)
     }
 
@@ -328,6 +355,7 @@ impl DisputeResolverContract {
     /// # Errors
     /// - `ContractError::DisputeNotFound` if no ruling exists for this ID.
     pub fn get_ruling(env: Env, dispute_id: u64) -> Result<Ruling, ContractError> {
+        storage::extend_instance_ttl(&env);
         storage::get_ruling(&env, dispute_id).ok_or(ContractError::DisputeNotFound)
     }
 
@@ -347,10 +375,11 @@ impl DisputeResolverContract {
     /// - `ContractError::InvalidConfig` if `resolution_window` is zero.
     pub fn initialize(
         env: Env,
-        admin: Address,
+        council: AdminCouncil,
         resolution_window: u32,
     ) -> Result<(), ContractError> {
-        if storage::has_admin(&env) {
+        storage::extend_instance_ttl(&env);
+        if storage::has_admin_council(&env) {
             return Err(ContractError::AlreadyInitialized);
         }
 
@@ -358,7 +387,11 @@ impl DisputeResolverContract {
             return Err(ContractError::InvalidConfig);
         }
 
-        storage::set_admin(&env, &admin);
+        if council.threshold == 0 || council.members.len() < council.threshold {
+            return Err(ContractError::InvalidCouncilConfig);
+        }
+
+        storage::set_admin_council(&env, &council);
         storage::set_resolution_window(&env, resolution_window);
 
         Ok(())

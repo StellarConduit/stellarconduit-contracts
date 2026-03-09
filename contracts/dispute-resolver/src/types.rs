@@ -4,7 +4,17 @@
 //! Purely type definitions — no logic. These structs and enums are used by
 //! every function in the contract.
 
-use soroban_sdk::{contracttype, Address, BytesN, String};
+use soroban_sdk::{contracttype, Address, BytesN, String, Vec};
+
+/// A multi-signature admin council requiring threshold approvals.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdminCouncil {
+    /// List of council member addresses (max 10)
+    pub members: Vec<Address>,
+    /// Minimum number of members required to authorize a sensitive action
+    pub threshold: u32,
+}
 
 /// Lifecycle status of a dispute.
 #[contracttype]

@@ -37,4 +37,10 @@ pub enum ContractError {
 
     /// Contract has already been initialized.
     AlreadyInitialized = 9,
+
+    /// Not enough council members authorized this action.
+    InsufficientApprovals = 10,
+
+    /// Council config is invalid (threshold > members, etc.).
+    InvalidCouncilConfig = 11,
 }
