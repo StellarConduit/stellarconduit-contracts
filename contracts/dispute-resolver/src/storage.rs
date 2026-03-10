@@ -46,6 +46,18 @@ pub enum DataKey {
     TxDispute(BytesN<32>),
     /// Stores the raw 32-byte Ed25519 public key for an Address.
     PublicKey(Address),
+    /// Stores the bond amount required to raise a dispute.
+    DisputeBond,
+    /// Stores the locked bond amount for a specific dispute ID.
+    LockedBond(u64),
+    /// Stores the cooldown period in ledgers between disputes.
+    CooldownPeriod,
+    /// Stores the ledger sequence of the last dispute raised by this address.
+    LastDisputeLedger(Address),
+    /// Stores the SAC token address for bond payments.
+    TokenAddress,
+    /// Stores the treasury address for forfeited bonds.
+    TreasuryAddress,
 }
 
 /// Load a dispute by its ID. Returns None if not found.
@@ -191,4 +203,92 @@ pub fn set_public_key(env: &Env, address: &Address, public_key: &BytesN<32>) {
     env.storage()
         .persistent()
         .extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
+}
+
+/// Get the dispute bond amount required to raise a dispute.
+pub fn get_dispute_bond(env: &Env) -> i128 {
+    env.storage()
+        .instance()
+        .get(&DataKey::DisputeBond)
+        .unwrap_or(0)
+}
+
+/// Set the dispute bond amount required to raise a dispute.
+pub fn set_dispute_bond(env: &Env, amount: i128) {
+    env.storage().instance().set(&DataKey::DisputeBond, &amount);
+}
+
+/// Get the locked bond amount for a specific dispute ID.
+pub fn get_locked_bond(env: &Env, dispute_id: u64) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&DataKey::LockedBond(dispute_id))
+        .unwrap_or(0)
+}
+
+/// Set the locked bond amount for a specific dispute ID.
+pub fn set_locked_bond(env: &Env, dispute_id: u64, amount: i128) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::LockedBond(dispute_id), &amount);
+}
+
+/// Get the cooldown period in ledgers between disputes.
+pub fn get_cooldown_period(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::CooldownPeriod)
+        .unwrap_or(0)
+}
+
+/// Set the cooldown period in ledgers between disputes.
+pub fn set_cooldown_period(env: &Env, period: u32) {
+    env.storage()
+        .instance()
+        .set(&DataKey::CooldownPeriod, &period);
+}
+
+/// Get the ledger sequence of the last dispute raised by this address.
+pub fn get_last_dispute_ledger(env: &Env, address: &Address) -> Option<u32> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::LastDisputeLedger(address.clone()))
+}
+
+/// Set the ledger sequence of the last dispute raised by this address.
+pub fn set_last_dispute_ledger(env: &Env, address: &Address, ledger_sequence: u32) {
+    env.storage().persistent().set(
+        &DataKey::LastDisputeLedger(address.clone()),
+        &ledger_sequence,
+    );
+}
+
+/// Get the SAC token address for bond payments.
+pub fn get_token_address(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&DataKey::TokenAddress)
+        .expect("token address not set")
+}
+
+/// Set the SAC token address for bond payments.
+pub fn set_token_address(env: &Env, token_address: &Address) {
+    env.storage()
+        .instance()
+        .set(&DataKey::TokenAddress, token_address);
+}
+
+/// Get the treasury address for forfeited bonds.
+pub fn get_treasury_address(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&DataKey::TreasuryAddress)
+        .expect("treasury address not set")
+}
+
+/// Set the treasury address for forfeited bonds.
+pub fn set_treasury_address(env: &Env, treasury_address: &Address) {
+    env.storage()
+        .instance()
+        .set(&DataKey::TreasuryAddress, treasury_address);
 }
