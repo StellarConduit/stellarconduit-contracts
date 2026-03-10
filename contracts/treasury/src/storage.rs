@@ -28,6 +28,17 @@ use soroban_sdk::{contracttype, Address, Env, String};
 
 use crate::types::{AdminCouncil, AllocationRecord, SpendingProgram, TreasuryEntry, TreasuryStats};
 
+// Bump by ~30 days (assuming ~5 seconds per ledger)
+const LEDGER_BUMP_AMOUNT: u32 = 518_400;
+// Bump if remaining life is less than ~15 days
+const LEDGER_BUMP_THRESHOLD: u32 = 259_200;
+
+pub fn extend_instance_ttl(env: &Env) {
+    env.storage()
+        .instance()
+        .extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
+}
+
 /// Storage keys for the treasury contract.
 #[contracttype]
 #[derive(Clone)]
@@ -61,16 +72,26 @@ pub fn set_balance(env: &Env, balance: i128) {
 }
 
 pub fn get_entry(env: &Env, entry_id: u64) -> Option<TreasuryEntry> {
-    env.storage().persistent().get(&DataKey::Entry(entry_id))
+    let key = DataKey::Entry(entry_id);
+    if let Some(entry) = env.storage().persistent().get::<_, TreasuryEntry>(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
+        Some(entry)
+    } else {
+        None
+    }
 }
 
 /// Append a new entry and increment the entry counter.
 pub fn set_entry(env: &Env, entry: TreasuryEntry) {
     let count = get_entry_count(env);
     let next_id = count + 1;
+    let key = DataKey::Entry(next_id);
+    env.storage().persistent().set(&key, &entry);
     env.storage()
         .persistent()
-        .set(&DataKey::Entry(next_id), &entry);
+        .extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
     env.storage().instance().set(&DataKey::EntryCount, &next_id);
 }
 
@@ -90,29 +111,45 @@ pub fn append_entry(env: &Env, entry: &TreasuryEntry) {
     let next_id = get_entry_count(env)
         .checked_add(1)
         .expect("entry count overflow");
+    let key = DataKey::Entry(next_id);
+    env.storage().persistent().set(&key, entry);
     env.storage()
         .persistent()
-        .set(&DataKey::Entry(next_id), entry);
+        .extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
     set_entry_count(env, next_id);
 }
 
 pub fn get_allocation(env: &Env, program: &String) -> Option<AllocationRecord> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::Allocation(program.clone()))
+    let key = DataKey::Allocation(program.clone());
+    if let Some(record) = env.storage().persistent().get::<_, AllocationRecord>(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
+        Some(record)
+    } else {
+        None
+    }
 }
 
 pub fn set_allocation(env: &Env, program: &String, record: &AllocationRecord) {
+    let key = DataKey::Allocation(program.clone());
+    env.storage().persistent().set(&key, record);
     env.storage()
         .persistent()
-        .set(&DataKey::Allocation(program.clone()), record);
+        .extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
 }
 
 /// Load a spending program by ID.
 pub fn get_spending_program(env: &Env, program_id: u64) -> Option<SpendingProgram> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::SpendingProgram(program_id))
+    let key = DataKey::SpendingProgram(program_id);
+    if let Some(program) = env.storage().persistent().get::<_, SpendingProgram>(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
+        Some(program)
+    } else {
+        None
+    }
 }
 
 pub fn get_program_count(env: &Env) -> u64 {
@@ -133,9 +170,11 @@ pub fn increment_program_count(env: &Env) -> u64 {
 
 /// Persist a spending program.
 pub fn set_spending_program(env: &Env, program_id: u64, program: SpendingProgram) {
+    let key = DataKey::SpendingProgram(program_id);
+    env.storage().persistent().set(&key, &program);
     env.storage()
         .persistent()
-        .set(&DataKey::SpendingProgram(program_id), &program);
+        .extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
 }
 
 /// Load the treasury admin council.

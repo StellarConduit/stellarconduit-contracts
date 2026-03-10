@@ -68,4 +68,7 @@ pub enum ContractError {
 
     /// Attempted withdrawal before the lock period elapsed.
     LockPeriodActive = 15,
+
+    /// Cannot reinstate a node that is not currently slashed.
+    NodeNotSlashed = 16,
 }

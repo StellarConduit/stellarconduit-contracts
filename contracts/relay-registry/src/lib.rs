@@ -124,6 +124,7 @@ impl RelayRegistryContract {
         min_stake: i128,
         stake_lock_period: u32,
     ) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
         // Guard against re-initialization
         if env
             .storage()
@@ -172,6 +173,7 @@ impl RelayRegistryContract {
         node_address: Address,
         metadata: NodeMetadata,
     ) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
         node_address.require_auth();
 
         if storage::get_node(&env, &node_address).is_some() {
@@ -222,6 +224,7 @@ impl RelayRegistryContract {
         node_address: Address,
         new_metadata: NodeMetadata,
     ) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
         node_address.require_auth();
 
         let mut node =
@@ -263,6 +266,7 @@ impl RelayRegistryContract {
     /// - `ContractError::InsufficientStake` if the `amount` is zero or negative.
     /// - `ContractError::Overflow` if adding the stake causes an arithmetic overflow.
     pub fn stake(env: Env, node_address: Address, amount: i128) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
         node_address.require_auth();
 
         let mut node =
@@ -310,6 +314,7 @@ impl RelayRegistryContract {
         node_address: Address,
         amount: i128,
     ) -> Result<RelayNode, ContractError> {
+        storage::extend_instance_ttl(&env);
         node_address.require_auth();
         if amount <= 0 {
             return Err(ContractError::InsufficientStake);
@@ -373,6 +378,7 @@ impl RelayRegistryContract {
     /// - `ContractError::NoPendingUnstake` if there isn't an active unstake request.
     /// - `ContractError::LockPeriodActive` if the lock duration hasn't concluded yet.
     pub fn finalize_unstake(env: Env, node_address: Address) -> Result<i128, ContractError> {
+        storage::extend_instance_ttl(&env);
         node_address.require_auth();
 
         let entry =
@@ -418,6 +424,7 @@ impl RelayRegistryContract {
     /// - `ContractError::NodeSlashed` if the node is already slashed.
     /// - (Auth) Soroban will automatically panic if the caller is not the `Admin`.
     pub fn slash(env: Env, node_address: Address, _reason: String) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
         require_council_auth(&env);
 
         let mut node =
@@ -451,6 +458,52 @@ impl RelayRegistryContract {
 
         Ok(())
     }
+
+    /// Reinstate a previously slashed relay node after a successful governance appeal.
+    ///
+    /// This function allows the admin council to move a node from `Slashed` back to
+    /// `Inactive` status after an off-chain appeals process determines that the slash
+    /// was unwarranted or due to non-malicious causes (e.g., hardware failure).
+    ///
+    /// The node does **not** regain any previously slashed stake; it must call `stake`
+    /// again to become `Active`.
+    ///
+    /// # Parameters
+    /// - `env`: Soroban environment for the current contract invocation.
+    /// - `node_address`: Address of the relay node to reinstate.
+    ///
+    /// # Errors
+    /// - `ContractError::NotRegistered` if the node is not in the registry.
+    /// - `ContractError::NodeNotSlashed` if the node is not currently slashed.
+    pub fn reinstate_node(env: Env, node_address: Address) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
+        // Only the admin council may reinstate a slashed node.
+        require_council_auth(&env);
+
+        let mut node =
+            storage::get_node(&env, &node_address).ok_or(ContractError::NotRegistered)?;
+
+        // Reinstatement is only valid for nodes that are currently slashed.
+        if !matches!(node.status, NodeStatus::Slashed) {
+            return Err(ContractError::NodeNotSlashed);
+        }
+
+        // Move the node back to Inactive; stake remains at 0.
+        node.status = NodeStatus::Inactive;
+        node.last_active = env.ledger().timestamp();
+
+        storage::set_node(&env, &node_address, &node);
+
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "relay_registry"),
+                soroban_sdk::Symbol::new(&env, "reinstate_node"),
+            ),
+            (node_address.clone(),),
+        );
+
+        Ok(())
+    }
     /// Retrieves a registered relay node's details.
     ///
     /// This is a view-only function that returns the `RelayNode` struct
@@ -466,6 +519,7 @@ impl RelayRegistryContract {
     /// # Errors
     /// - `ContractError::NotRegistered`: If the address is not registered in the registry.
     pub fn get_node(env: Env, address: Address) -> Result<RelayNode, ContractError> {
+        storage::extend_instance_ttl(&env);
         storage::get_node(&env, &address).ok_or(ContractError::NotRegistered)
     }
 
@@ -483,6 +537,7 @@ impl RelayRegistryContract {
     /// - `true`: If the node exists and its status is `NodeStatus::Active`.
     /// - `false`: If the node is not registered, or its status is not active.
     pub fn is_active(env: Env, address: Address) -> bool {
+        storage::extend_instance_ttl(&env);
         matches!(
             storage::get_node(&env, &address).map(|n| n.status),
             Some(NodeStatus::Active)

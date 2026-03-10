@@ -61,6 +61,7 @@ impl TreasuryContract {
     ///
     /// Public view function; never errors. Returns 0 if balance is unset.
     pub fn get_balance(env: Env) -> i128 {
+        storage::extend_instance_ttl(&env);
         storage::get_balance(&env)
     }
 
@@ -68,6 +69,7 @@ impl TreasuryContract {
     ///
     /// Uses `ContractError::ProgramNotFound` when an entry is not found.
     pub fn get_history(env: Env, entry_id: u64) -> Result<TreasuryEntry, ContractError> {
+        storage::extend_instance_ttl(&env);
         storage::get_entry(&env, entry_id).ok_or(ContractError::ProgramNotFound)
     }
 
@@ -79,6 +81,7 @@ impl TreasuryContract {
         council: AdminCouncil,
         token_address: Address,
     ) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
         if storage::has_admin_council(&env) {
             return Err(ContractError::AlreadyInitialized);
         }
@@ -105,6 +108,7 @@ impl TreasuryContract {
     /// - `ContractError::InvalidAmount` if `amount` is zero or negative.
     /// - `ContractError::Overflow` if the balance arithmetic overflows.
     pub fn deposit(env: Env, from: Address, amount: i128) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
         from.require_auth();
 
         if amount <= 0 {
@@ -166,6 +170,7 @@ impl TreasuryContract {
         amount: i128,
         memo: String,
     ) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
         require_council_auth(&env);
 
         if amount <= 0 {
@@ -219,6 +224,7 @@ impl TreasuryContract {
     /// - `name`: Name of the program (3-64 chars).
     /// - `budget`: Initial budget for the program. Must be > 0.
     pub fn create_program(env: Env, name: String, budget: i128) -> Result<u64, ContractError> {
+        storage::extend_instance_ttl(&env);
         require_council_auth(&env);
 
         if budget <= 0 {
@@ -258,6 +264,7 @@ impl TreasuryContract {
         program_id: u64,
         new_budget: i128,
     ) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
         require_council_auth(&env);
 
         let mut program = storage::get_spending_program(&env, program_id)
@@ -283,6 +290,7 @@ impl TreasuryContract {
 
     /// Deactivate a spending program.
     pub fn deactivate_program(env: Env, program_id: u64) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
         require_council_auth(&env);
 
         let mut program = storage::get_spending_program(&env, program_id)
@@ -304,6 +312,7 @@ impl TreasuryContract {
 
     /// Get details of a spending program.
     pub fn get_program(env: Env, program_id: u64) -> Result<SpendingProgram, ContractError> {
+        storage::extend_instance_ttl(&env);
         storage::get_spending_program(&env, program_id).ok_or(ContractError::ProgramNotFound)
     }
 
@@ -322,6 +331,7 @@ impl TreasuryContract {
     /// - `ContractError::InsufficientBalance` if treasury balance is too low.
     /// - `ContractError::Overflow` if arithmetic overflows.
     pub fn allocate(env: Env, program_id: u64, amount: i128) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
         require_council_auth(&env);
 
         if amount <= 0 {
@@ -406,6 +416,7 @@ impl TreasuryContract {
     ///   - `lifetime_withdrawn`: Total tokens withdrawn over the treasury's lifetime
     ///   - `lifetime_allocated`: Total tokens allocated to spending programs
     pub fn get_treasury_stats(env: Env) -> TreasuryStats {
+        storage::extend_instance_ttl(&env);
         let mut stats = storage::get_stats(&env);
         // current_balance is dynamic, fetch it fresh to ensure accuracy
         stats.current_balance = storage::get_balance(&env);

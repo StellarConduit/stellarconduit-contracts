@@ -83,6 +83,7 @@ impl FeeDistributorContract {
         treasury: Address,
         token: Address,
     ) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
         // Guard against re-initialization
         if env.storage().instance().has(&storage::DataKey::FeeConfig) {
             return Err(ContractError::AlreadyInitialized);
@@ -132,6 +133,7 @@ impl FeeDistributorContract {
     /// - `ContractError::InvalidBatchSize` if `batch_size` is zero.
     /// - `ContractError::Overflow` if the calculation overflows.
     pub fn calculate_fee(env: Env, batch_size: u32) -> Result<i128, ContractError> {
+        storage::extend_instance_ttl(&env);
         if batch_size == 0 {
             return Err(ContractError::InvalidBatchSize);
         }
@@ -171,6 +173,7 @@ impl FeeDistributorContract {
         batch_id: u64,
         batch_size: u32,
     ) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
         if storage::get_fee_entry(&env, batch_id).is_some() {
             return Err(ContractError::BatchAlreadyDistributed);
         }
@@ -266,6 +269,7 @@ impl FeeDistributorContract {
     /// - `ContractError::NothingToClaim` if the relay node has no unclaimed earnings.
     /// - `ContractError::Overflow` if the arithmetic for updating `total_claimed` overflows.
     pub fn claim(env: Env, relay_address: Address) -> Result<i128, ContractError> {
+        storage::extend_instance_ttl(&env);
         relay_address.require_auth();
 
         let mut record = storage::get_earnings(&env, &relay_address);
@@ -309,6 +313,7 @@ impl FeeDistributorContract {
     /// # Returns
     /// An `EarningsRecord` containing the relay node's fee history.
     pub fn get_earnings(env: Env, relay_address: Address) -> crate::types::EarningsRecord {
+        storage::extend_instance_ttl(&env);
         storage::get_earnings(&env, &relay_address)
     }
 
@@ -325,6 +330,7 @@ impl FeeDistributorContract {
     /// - Auth error if caller is not the admin.
     /// - `ContractError::InvalidFeeRate` if the rate is 0 or greater than 10000.
     pub fn set_fee_rate(env: Env, new_fee_rate_bps: u32) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
         let mut config = storage::get_fee_config(&env);
 
         require_council_auth(&env, &config.council);
