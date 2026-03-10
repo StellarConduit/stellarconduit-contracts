@@ -6,41 +6,37 @@
 
 use soroban_sdk::contracterror;
 
-/// Contract error codes returned by the Dispute Resolver contract.
-///
-/// Each variant represents a typed failure state for arbitration flows
-/// and maps to a stable `u32` value for clients and callers.
+/// Contract error codes returned by the Dispute Resolver.
 #[contracterror]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
-#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ContractError {
-    /// Thrown when the referenced dispute ID does not exist in storage.
+    /// The specified dispute_id does not exist in storage.
     DisputeNotFound = 1,
-    /// Thrown when a dispute has already been finalized and cannot be resolved again.
+    /// The dispute has already been resolved or ruled on.
     DisputeAlreadyResolved = 2,
-    /// Thrown when resolution is attempted before a respondent has submitted a response.
-    NotResponded = 3,
-    /// Thrown when the cryptographic signature on a provided proof is invalid.
-    InvalidProofSignature = 4,
-    /// Thrown when a provided relay chain hash is malformed.
-    InvalidChainHash = 5,
-    /// Thrown when provided contract configuration values are invalid.
-    InvalidConfig = 6,
-    /// Thrown when provided admin council configuration is invalid.
-    InvalidCouncilConfig = 7,
-    /// Thrown when a dispute for the same transaction ID has already been raised.
+    /// The dispute passed its resolution deadline without a response.
+    DisputeExpired = 3,
+    /// The dispute is still open and awaiting a counter-proof.
+    DisputeNotResolvable = 4,
+    /// The calling party has already submitted a proof for this dispute.
+    ProofAlreadySubmitted = 5,
+    /// The submitted relay chain proof fails cryptographic verification.
+    InvalidProof = 6,
+    /// Caller is not a party to this dispute.
+    Unauthorized = 7,
+    /// A dispute for this transaction ID already exists.
     DuplicateDispute = 8,
-    /// Thrown when the caller is not authorized to perform the action.
-    Unauthorized = 9,
-    /// Thrown when a dispute is not currently in the Open state.
+    /// Arithmetic overflow in dispute ID generation.
+    Overflow = 9,
+    /// The dispute is not in Open status.
     NotOpen = 10,
-    /// Thrown when the response deadline has already passed.
+    /// The resolution window has expired.
     ResolutionWindowExpired = 11,
-    /// Thrown when resolution is attempted while the respondent window is still active.
+    /// The resolution window is still active.
     ResolutionWindowActive = 12,
-    /// Thrown when contract initialization has not been performed yet.
-    NotInitialized = 13,
-    /// Thrown when initialization is attempted after the contract is already initialized.
+    /// The dispute has not been responded to.
+    NotResponded = 13,
+    /// The contract has already been initialized.
     AlreadyInitialized = 14,
     /// Invalid configuration parameter.
     InvalidConfig = 15,
