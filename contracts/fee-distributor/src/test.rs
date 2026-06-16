@@ -897,7 +897,10 @@ fn make_council(env: &Env, members: &[&Address], threshold: u32) -> crate::types
     for m in members {
         v.push_back((*m).clone());
     }
-    crate::types::AdminCouncil { members: v, threshold }
+    crate::types::AdminCouncil {
+        members: v,
+        threshold,
+    }
 }
 
 fn fee_rate_mock_auth<'a>(
@@ -936,11 +939,24 @@ fn test_council_1_of_3_carol_authorizes() {
             invoke: &MockAuthInvoke {
                 contract: &contract_id,
                 fn_name: "initialize",
-                args: (&council, &50u32, &1000u32, &Address::generate(&env), &Address::generate(&env)).into_val(&env),
+                args: (
+                    &council,
+                    &50u32,
+                    &1000u32,
+                    &Address::generate(&env),
+                    &Address::generate(&env),
+                )
+                    .into_val(&env),
                 sub_invokes: &[],
             },
         }])
-        .initialize(&council, &50u32, &1000u32, &Address::generate(&env), &Address::generate(&env));
+        .initialize(
+            &council,
+            &50u32,
+            &1000u32,
+            &Address::generate(&env),
+            &Address::generate(&env),
+        );
 
     // Only Carol signs.
     env.mock_auths(&[fee_rate_mock_auth(&env, &contract_id, &carol, 100)]);

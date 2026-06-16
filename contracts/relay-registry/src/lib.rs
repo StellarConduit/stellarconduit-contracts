@@ -43,12 +43,8 @@ fn require_council_auth(env: &Env) {
     // letting us count council members without panicking on missing ones.
     #[cfg(feature = "testutils")]
     {
-        use soroban_sdk::testutils::AuthorizedInvocation as _;
-        let authorized_addresses: soroban_sdk::Vec<Address> = env
-            .auths()
-            .iter()
-            .map(|(addr, _)| addr)
-            .collect();
+        let authorized_addresses: soroban_sdk::Vec<Address> =
+            env.auths().iter().map(|(addr, _)| addr).collect();
 
         let mut authorized_members: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(env);
         for member in council.members.iter() {

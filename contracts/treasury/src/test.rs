@@ -507,12 +507,19 @@ fn test_get_treasury_stats_full_lifecycle() {
 // M-of-N Council Auth Tests
 // ============================================================================
 
-fn treasury_make_council(env: &Env, members: &[&Address], threshold: u32) -> crate::types::AdminCouncil {
+fn treasury_make_council(
+    env: &Env,
+    members: &[&Address],
+    threshold: u32,
+) -> crate::types::AdminCouncil {
     let mut v = soroban_sdk::Vec::new(env);
     for m in members {
         v.push_back((*m).clone());
     }
-    crate::types::AdminCouncil { members: v, threshold }
+    crate::types::AdminCouncil {
+        members: v,
+        threshold,
+    }
 }
 
 fn withdraw_mock_auth<'a>(
@@ -585,13 +592,7 @@ fn test_treasury_council_1_of_3_carol_authorizes() {
 
     let (client, token_address) = setup_treasury_council(&env, &alice, &bob, &carol, 1);
 
-    env.mock_auths(&[withdraw_mock_auth(
-        &env,
-        &client.address,
-        &carol,
-        &to,
-        1000,
-    )]);
+    env.mock_auths(&[withdraw_mock_auth(&env, &client.address, &carol, &to, 1000)]);
 
     let result = client.try_withdraw(&to, &1000, &String::from_str(&env, "test"));
     assert_eq!(result, Ok(Ok(())));
@@ -609,16 +610,13 @@ fn test_treasury_council_2_of_3_single_sig_rejected() {
 
     let (client, _token_address) = setup_treasury_council(&env, &alice, &bob, &carol, 2);
 
-    env.mock_auths(&[withdraw_mock_auth(
-        &env,
-        &client.address,
-        &alice,
-        &to,
-        1000,
-    )]);
+    env.mock_auths(&[withdraw_mock_auth(&env, &client.address, &alice, &to, 1000)]);
 
     let result = client.try_withdraw(&to, &1000, &String::from_str(&env, "test"));
-    assert_eq!(result, Err(Ok(crate::errors::ContractError::InsufficientApprovals)));
+    assert_eq!(
+        result,
+        Err(Ok(crate::errors::ContractError::InsufficientApprovals))
+    );
 }
 
 /// 2-of-3: Bob + Carol (neither first in Vec) succeed.
@@ -654,5 +652,8 @@ fn test_treasury_council_no_sigs_rejected() {
 
     // No mock_auths at all.
     let result = client.try_withdraw(&to, &1000, &String::from_str(&env, "test"));
-    assert_eq!(result, Err(Ok(crate::errors::ContractError::InsufficientApprovals)));
+    assert_eq!(
+        result,
+        Err(Ok(crate::errors::ContractError::InsufficientApprovals))
+    );
 }

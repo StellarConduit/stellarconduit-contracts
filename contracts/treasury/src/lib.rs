@@ -41,11 +41,8 @@ fn require_council_auth(env: &Env) {
 
     #[cfg(feature = "testutils")]
     {
-        let authorized_addresses: soroban_sdk::Vec<Address> = env
-            .auths()
-            .iter()
-            .map(|(addr, _)| addr)
-            .collect();
+        let authorized_addresses: soroban_sdk::Vec<Address> =
+            env.auths().iter().map(|(addr, _)| addr).collect();
 
         let mut authorized_members: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(env);
         for member in council.members.iter() {

@@ -93,12 +93,7 @@ fn test_threshold_1_of_3_carol_can_authorize() {
     let client = setup_council(&env, &alice, &bob, &carol, 1, &node);
 
     // Only Carol signs — Carol is position 3, not first.
-    env.mock_auths(&[slash_mock_auth(
-        &env,
-        &client.address,
-        &carol,
-        &node,
-    )]);
+    env.mock_auths(&[slash_mock_auth(&env, &client.address, &carol, &node)]);
 
     let result = client.try_slash(&node, &String::from_str(&env, "misbehaving"));
     assert_eq!(result, Ok(Ok(())));
@@ -116,12 +111,7 @@ fn test_threshold_2_of_3_single_sig_rejected() {
     let client = setup_council(&env, &alice, &bob, &carol, 2, &node);
 
     // Only Alice signs — threshold is 2, should be rejected.
-    env.mock_auths(&[slash_mock_auth(
-        &env,
-        &client.address,
-        &alice,
-        &node,
-    )]);
+    env.mock_auths(&[slash_mock_auth(&env, &client.address, &alice, &node)]);
 
     let result = client.try_slash(&node, &String::from_str(&env, "misbehaving"));
     assert_eq!(result, Err(Ok(ContractError::InsufficientApprovals)));

@@ -166,3 +166,107 @@ fn test_resolve_both_invalid() {
     let result = client.try_resolve(&dispute_id);
     assert!(result.is_err());
 }
+
+// ── M-of-N Council Auth Tests (update_resolution_window is council-gated) ───
+
+fn update_window_mock_auth<'a>(
+    env: &'a Env,
+    contract_id: &Address,
+    signer: &'a Address,
+    new_window: u32,
+) -> soroban_sdk::testutils::MockAuth<'a> {
+    use soroban_sdk::IntoVal;
+    soroban_sdk::testutils::MockAuth {
+        address: signer,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: contract_id,
+            fn_name: "update_resolution_window",
+            args: (new_window,).into_val(env),
+            sub_invokes: &[],
+        },
+    }
+}
+
+fn setup_council_contract<'a>(
+    env: &'a Env,
+    alice: &Address,
+    bob: &Address,
+    carol: &Address,
+    threshold: u32,
+) -> DisputeResolverContractClient<'a> {
+    use crate::types::AdminCouncil;
+    let contract_id = env.register(DisputeResolverContract, ());
+    let client = DisputeResolverContractClient::new(env, &contract_id);
+    let mut members = soroban_sdk::Vec::new(env);
+    members.push_back(alice.clone());
+    members.push_back(bob.clone());
+    members.push_back(carol.clone());
+    let council = AdminCouncil { members, threshold };
+    env.mock_all_auths();
+    client.initialize(&council, &100u32);
+    client
+}
+
+/// 1-of-3: Carol (position 3) alone can authorize update_resolution_window.
+#[test]
+fn test_council_1_of_3_carol_authorizes() {
+    let env = Env::default();
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+    let client = setup_council_contract(&env, &alice, &bob, &carol, 1);
+
+    env.mock_auths(&[update_window_mock_auth(&env, &client.address, &carol, 200)]);
+    let result = client.try_update_resolution_window(&200u32);
+    assert_eq!(result, Ok(Ok(())));
+}
+
+/// 2-of-3: Single sig (Alice) is rejected.
+#[test]
+fn test_council_2_of_3_single_sig_rejected() {
+    let env = Env::default();
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+    let client = setup_council_contract(&env, &alice, &bob, &carol, 2);
+
+    env.mock_auths(&[update_window_mock_auth(&env, &client.address, &alice, 200)]);
+    let result = client.try_update_resolution_window(&200u32);
+    assert_eq!(
+        result,
+        Err(Ok(crate::errors::ContractError::InsufficientApprovals))
+    );
+}
+
+/// 2-of-3: Bob + Carol (neither first in Vec) succeed.
+#[test]
+fn test_council_2_of_3_bob_and_carol_succeed() {
+    let env = Env::default();
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+    let client = setup_council_contract(&env, &alice, &bob, &carol, 2);
+
+    env.mock_auths(&[
+        update_window_mock_auth(&env, &client.address, &bob, 200),
+        update_window_mock_auth(&env, &client.address, &carol, 200),
+    ]);
+    let result = client.try_update_resolution_window(&200u32);
+    assert_eq!(result, Ok(Ok(())));
+}
+
+/// No signatures → InsufficientApprovals.
+#[test]
+fn test_council_no_sigs_rejected() {
+    let env = Env::default();
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+    let client = setup_council_contract(&env, &alice, &bob, &carol, 1);
+
+    let result = client.try_update_resolution_window(&200u32);
+    assert_eq!(
+        result,
+        Err(Ok(crate::errors::ContractError::InsufficientApprovals))
+    );
+}
