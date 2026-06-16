@@ -169,24 +169,6 @@ fn test_resolve_both_invalid() {
 
 // ── M-of-N Council Auth Tests (update_resolution_window is council-gated) ───
 
-fn update_window_mock_auth<'a>(
-    env: &'a Env,
-    contract_id: &Address,
-    signer: &'a Address,
-    new_window: u32,
-) -> soroban_sdk::testutils::MockAuth<'a> {
-    use soroban_sdk::IntoVal;
-    soroban_sdk::testutils::MockAuth {
-        address: signer,
-        invoke: &soroban_sdk::testutils::MockAuthInvoke {
-            contract: contract_id,
-            fn_name: "update_resolution_window",
-            args: (new_window,).into_val(env),
-            sub_invokes: &[],
-        },
-    }
-}
-
 fn setup_council_contract<'a>(
     env: &'a Env,
     alice: &Address,
@@ -210,13 +192,19 @@ fn setup_council_contract<'a>(
 /// 1-of-3: Carol (position 3) alone can authorize update_resolution_window.
 #[test]
 fn test_council_1_of_3_carol_authorizes() {
+    use soroban_sdk::{testutils::MockAuth, IntoVal};
     let env = Env::default();
     let alice = Address::generate(&env);
     let bob = Address::generate(&env);
     let carol = Address::generate(&env);
     let client = setup_council_contract(&env, &alice, &bob, &carol, 1);
-
-    env.mock_auths(&[update_window_mock_auth(&env, &client.address, &carol, 200)]);
+    let invoke = soroban_sdk::testutils::MockAuthInvoke {
+        contract: &client.address,
+        fn_name: "update_resolution_window",
+        args: (200u32,).into_val(&env),
+        sub_invokes: &[],
+    };
+    env.mock_auths(&[MockAuth { address: &carol, invoke: &invoke }]);
     let result = client.try_update_resolution_window(&200u32);
     assert_eq!(result, Ok(Ok(())));
 }
@@ -224,13 +212,19 @@ fn test_council_1_of_3_carol_authorizes() {
 /// 2-of-3: Single sig (Alice) is rejected.
 #[test]
 fn test_council_2_of_3_single_sig_rejected() {
+    use soroban_sdk::{testutils::MockAuth, IntoVal};
     let env = Env::default();
     let alice = Address::generate(&env);
     let bob = Address::generate(&env);
     let carol = Address::generate(&env);
     let client = setup_council_contract(&env, &alice, &bob, &carol, 2);
-
-    env.mock_auths(&[update_window_mock_auth(&env, &client.address, &alice, 200)]);
+    let invoke = soroban_sdk::testutils::MockAuthInvoke {
+        contract: &client.address,
+        fn_name: "update_resolution_window",
+        args: (200u32,).into_val(&env),
+        sub_invokes: &[],
+    };
+    env.mock_auths(&[MockAuth { address: &alice, invoke: &invoke }]);
     let result = client.try_update_resolution_window(&200u32);
     assert_eq!(
         result,
@@ -241,15 +235,27 @@ fn test_council_2_of_3_single_sig_rejected() {
 /// 2-of-3: Bob + Carol (neither first in Vec) succeed.
 #[test]
 fn test_council_2_of_3_bob_and_carol_succeed() {
+    use soroban_sdk::{testutils::MockAuth, IntoVal};
     let env = Env::default();
     let alice = Address::generate(&env);
     let bob = Address::generate(&env);
     let carol = Address::generate(&env);
     let client = setup_council_contract(&env, &alice, &bob, &carol, 2);
-
+    let invoke_bob = soroban_sdk::testutils::MockAuthInvoke {
+        contract: &client.address,
+        fn_name: "update_resolution_window",
+        args: (200u32,).into_val(&env),
+        sub_invokes: &[],
+    };
+    let invoke_carol = soroban_sdk::testutils::MockAuthInvoke {
+        contract: &client.address,
+        fn_name: "update_resolution_window",
+        args: (200u32,).into_val(&env),
+        sub_invokes: &[],
+    };
     env.mock_auths(&[
-        update_window_mock_auth(&env, &client.address, &bob, 200),
-        update_window_mock_auth(&env, &client.address, &carol, 200),
+        MockAuth { address: &bob, invoke: &invoke_bob },
+        MockAuth { address: &carol, invoke: &invoke_carol },
     ]);
     let result = client.try_update_resolution_window(&200u32);
     assert_eq!(result, Ok(Ok(())));
