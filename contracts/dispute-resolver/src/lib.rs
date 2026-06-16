@@ -28,7 +28,7 @@
 
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String};
+use soroban_sdk::{contract, contractimpl, token, Address, Bytes, BytesN, Env, String};
 
 pub mod errors;
 pub mod storage;
@@ -58,6 +58,7 @@ impl DisputeResolverContract {
     ///
     /// # Errors
     /// - `ContractError::DuplicateDispute` if a dispute for this `tx_id` already exists.
+    /// - `ContractError::RateLimitExceeded` if the caller hasn't waited the cooldown period.
     pub fn raise_dispute(
         env: Env,
         initiator: Address,
@@ -72,8 +73,27 @@ impl DisputeResolverContract {
             return Err(ContractError::DuplicateDispute);
         }
 
+        // Enforce per-address cooldown to prevent spam.
+        let cooldown = storage::get_cooldown_period(&env);
+        if cooldown > 0 {
+            let last = storage::get_last_dispute_ledger(&env, &initiator).unwrap_or(0);
+            let current_sequence = env.ledger().sequence();
+            if current_sequence < last + cooldown {
+                return Err(ContractError::RateLimitExceeded);
+            }
+            storage::set_last_dispute_ledger(&env, &initiator, current_sequence);
+        }
+
         // Auto-increment and get the next dispute ID (starts at 1).
         let dispute_id = storage::get_next_dispute_id(&env);
+
+        // Collect bond if required.
+        let bond = storage::get_dispute_bond(&env);
+        if bond > 0 {
+            let token = token::Client::new(&env, &storage::get_token_address(&env));
+            token.transfer(&initiator, &env.current_contract_address(), &bond);
+            storage::set_locked_bond(&env, dispute_id, bond);
+        }
 
         // Compute the response deadline as a ledger sequence number.
         let resolution_window = storage::get_resolution_window(&env);
@@ -206,6 +226,19 @@ impl DisputeResolverContract {
             dispute.status = DisputeStatus::Resolved;
             storage::set_dispute(&env, dispute_id, &dispute);
             storage::set_ruling(&env, dispute_id, &ruling);
+
+            // Handle bond refund - initiator wins by default, so refund bond
+            let locked_bond = storage::get_locked_bond(&env, dispute_id);
+            if locked_bond > 0 {
+                let token = token::Client::new(&env, &storage::get_token_address(&env));
+                token.transfer(
+                    &env.current_contract_address(),
+                    &dispute.initiator,
+                    &locked_bond,
+                );
+                storage::set_locked_bond(&env, dispute_id, 0);
+            }
+
             env.events().publish(
                 (
                     soroban_sdk::Symbol::new(&env, "dispute_resolver"),
@@ -294,6 +327,26 @@ impl DisputeResolverContract {
         storage::set_dispute(&env, dispute_id, &dispute);
         storage::set_ruling(&env, dispute_id, &ruling);
 
+        // Handle bond refund/forfeiture after ruling.
+        let locked_bond = storage::get_locked_bond(&env, dispute_id);
+        if locked_bond > 0 {
+            let token = token::Client::new(&env, &storage::get_token_address(&env));
+            if winner == dispute.initiator {
+                // Initiator won - refund bond back to initiator
+                token.transfer(
+                    &env.current_contract_address(),
+                    &dispute.initiator,
+                    &locked_bond,
+                );
+            } else {
+                // Respondent won - transfer bond to treasury
+                let treasury = storage::get_treasury_address(&env);
+                token.transfer(&env.current_contract_address(), &treasury, &locked_bond);
+            }
+            // Clear the locked bond record
+            storage::set_locked_bond(&env, dispute_id, 0);
+        }
+
         env.events().publish(
             (
                 soroban_sdk::Symbol::new(&env, "dispute_resolver"),
@@ -363,20 +416,29 @@ impl DisputeResolverContract {
     ///
     /// Sets the admin capable of upgrading/configuring the contract, and
     /// configures the global resolution window for how long a respondent has
-    /// to provide a counter-proof.
+    /// to provide a counter-proof. Also configures bond requirements and
+    /// cooldown periods to prevent spam.
     ///
     /// # Parameters
     /// - `env`: Soroban environment.
-    /// - `admin`: The address to set as the contract administrator.
+    /// - `council`: The admin council for contract governance.
     /// - `resolution_window`: Number of ledgers allowed for responding to disputes.
+    /// - `dispute_bond`: Bond amount required to raise a dispute (0 to disable).
+    /// - `cooldown_period`: Number of ledgers between disputes per address (0 to disable).
+    /// - `token_address`: SAC token address for bond payments.
+    /// - `treasury_address`: Address for receiving forfeited bonds.
     ///
     /// # Errors
     /// - `ContractError::AlreadyInitialized` if called more than once.
-    /// - `ContractError::InvalidConfig` if `resolution_window` is zero.
+    /// - `ContractError::InvalidConfig` if parameters are invalid.
     pub fn initialize(
         env: Env,
         council: AdminCouncil,
         resolution_window: u32,
+        dispute_bond: i128,
+        cooldown_period: u32,
+        token_address: Address,
+        treasury_address: Address,
     ) -> Result<(), ContractError> {
         storage::extend_instance_ttl(&env);
         if storage::has_admin_council(&env) {
@@ -387,12 +449,20 @@ impl DisputeResolverContract {
             return Err(ContractError::InvalidConfig);
         }
 
+        if dispute_bond < 0 {
+            return Err(ContractError::InvalidConfig);
+        }
+
         if council.threshold == 0 || council.members.len() < council.threshold {
             return Err(ContractError::InvalidCouncilConfig);
         }
 
         storage::set_admin_council(&env, &council);
         storage::set_resolution_window(&env, resolution_window);
+        storage::set_dispute_bond(&env, dispute_bond);
+        storage::set_cooldown_period(&env, cooldown_period);
+        storage::set_token_address(&env, &token_address);
+        storage::set_treasury_address(&env, &treasury_address);
 
         Ok(())
     }
