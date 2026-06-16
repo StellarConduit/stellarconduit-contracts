@@ -172,8 +172,8 @@ fn test_withdraw_insufficient_balance() {
 fn test_allocate_by_admin() {
     let env = Env::default();
     env.mock_all_auths();
-    let client = create_treasury_contract(&env);
     let admin = Address::generate(&env);
+    let client = create_treasury_contract(&env);
 
     let (token_client, token_address) = create_token_contract(&env, &admin);
     token_client.mint(&admin, &20000);
@@ -187,21 +187,16 @@ fn test_allocate_by_admin() {
         };
         storage::set_admin_council(&env, &council);
         storage::set_token_address(&env, &token_address);
-        let program = SpendingProgram {
-            program_id: 1,
-            name: String::from_str(&env, "Test Program"),
-            budget: 5000,
-            spent: 0,
-            active: true,
-        };
-        storage::set_spending_program(&env, 1, program);
     });
     client.deposit(&admin, &10000);
 
-    client.allocate(&1, &2000);
+    let name = String::from_str(&env, "Test Program");
+    let program_id = client.create_program(&name, &5000).unwrap();
+
+    client.allocate(&program_id, &2000);
 
     let (spent, bal) = env.as_contract(&client.address, || {
-        let prog = storage::get_spending_program(&env, 1).unwrap();
+        let prog = storage::get_spending_program(&env, program_id).unwrap();
         (prog.spent, storage::get_balance(&env))
     });
     assert_eq!(spent, 2000);
@@ -501,4 +496,237 @@ fn test_get_treasury_stats_full_lifecycle() {
     assert_eq!(stats.lifetime_deposited, 15000); // 10000 + 5000
     assert_eq!(stats.lifetime_withdrawn, 3000);
     assert_eq!(stats.lifetime_allocated, 4000);
+}
+
+// =========================================================================
+// SPENDING PROGRAM LIFECYCLE TESTS (ISSUE #110)
+// =========================================================================
+
+fn setup_initialized_treasury<'a>(env: &Env, admin: &Address) -> TreasuryContractClient<'a> {
+    let client = create_treasury_contract(env);
+    let mut members = soroban_sdk::Vec::new(env);
+    members.push_back(admin.clone());
+    let council = crate::types::AdminCouncil {
+        members,
+        threshold: 1,
+    };
+    let (_, token_address) = create_token_contract(env, admin);
+    
+    client.initialize(&council, &token_address).unwrap();
+    client
+}
+
+// --- 1. create_program() Tests ---
+
+#[test]
+fn test_create_program_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    let name1 = String::from_str(&env, "First Program");
+    let program_id1 = client.create_program(&name1, &5000).unwrap();
+    assert_eq!(program_id1, 1);
+
+    let name2 = String::from_str(&env, "Second Program");
+    let program_id2 = client.create_program(&name2, &10000).unwrap();
+    assert_eq!(program_id2, 2);
+
+    // Verify event emission for the second creation
+    let events = env.events().all();
+    let (_, topics, _data) = events.get(events.len() - 1).unwrap();
+    
+    assert_eq!(
+        topics.get(1).unwrap(),
+        soroban_sdk::Symbol::new(&env, "create_program")
+    );
+    
+    // Verify program content from public view function
+    let prog = client.get_program(&1).unwrap();
+    assert_eq!(prog.budget, 5000);
+    assert_eq!(prog.spent, 0);
+    assert!(prog.active);
+}
+
+#[test]
+fn test_create_program_invalid_budget() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    let name = String::from_str(&env, "Invalid Budget Prog");
+    let res = client.try_create_program(&name, &0);
+    assert_eq!(res, Err(Ok(crate::errors::ContractError::InvalidAmount)));
+
+    let res_neg = client.try_create_program(&name, &-100);
+    assert_eq!(res_neg, Err(Ok(crate::errors::ContractError::InvalidAmount)));
+}
+
+#[test]
+fn test_create_program_invalid_name() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    // Too short (2 characters)
+    let short_name = String::from_str(&env, "ab");
+    let res_short = client.try_create_program(&short_name, &5000);
+    assert_eq!(res_short, Err(Ok(crate::errors::ContractError::InvalidProgramName)));
+
+    // Too long (65 characters)
+    let long_str = "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmno";
+    let long_name = String::from_str(&env, long_str);
+    let res_long = client.try_create_program(&long_name, &5000);
+    assert_eq!(res_long, Err(Ok(crate::errors::ContractError::InvalidProgramName)));
+}
+
+#[test]
+#[should_panic(expected = "Insufficient approvals")]
+fn test_create_program_unauthorized() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    let name = String::from_str(&env, "Unauthorized Program");
+    let _ = client.create_program(&name, &5000);
+}
+
+// --- 2. update_program_budget() Tests ---
+
+#[test]
+fn test_update_program_budget_increase() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    let name = String::from_str(&env, "Budget Test");
+    let program_id = client.create_program(&name, &5000).unwrap();
+
+    client.update_program_budget(&program_id, &7500).unwrap();
+    
+    let prog = client.get_program(&program_id).unwrap();
+    assert_eq!(prog.budget, 7500);
+
+    // Verify update event
+    let events = env.events().all();
+    let (_, topics, _) = events.get(events.len() - 1).unwrap();
+    assert_eq!(
+        topics.get(1).unwrap(),
+        soroban_sdk::Symbol::new(&env, "update_budget")
+    );
+}
+
+#[test]
+fn test_update_program_budget_decrease() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    let name = String::from_str(&env, "Budget Test");
+    let program_id = client.create_program(&name, &5000).unwrap();
+
+    client.update_program_budget(&program_id, &3000).unwrap();
+    
+    let prog = client.get_program(&program_id).unwrap();
+    assert_eq!(prog.budget, 3000);
+}
+
+#[test]
+fn test_update_program_budget_below_spent() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    // Setup asset and balance for allocating
+    let contract_id = client.address.clone();
+    let (token_client, token_address) = create_token_contract(&env, &admin);
+    token_client.mint(&admin, &10000);
+    env.as_contract(&contract_id, || {
+        storage::set_token_address(&env, &token_address);
+    });
+    client.deposit(&admin, &5000).unwrap();
+
+    let name = String::from_str(&env, "Budget Test");
+    let program_id = client.create_program(&name, &5000).unwrap();
+    
+    client.allocate(&program_id, &2000).unwrap();
+
+    // Trying to lower budget to 1500 (which is less than spent amount of 2000) must fail
+    let res = client.try_update_program_budget(&program_id, &1500);
+    assert_eq!(res, Err(Ok(crate::errors::ContractError::InvalidAmount)));
+}
+
+#[test]
+fn test_update_program_budget_not_found() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    let res = client.try_update_program_budget(&999, &5000);
+    assert_eq!(res, Err(Ok(crate::errors::ContractError::ProgramNotFound)));
+}
+
+#[test]
+#[should_panic(expected = "Insufficient approvals")]
+fn test_update_program_budget_unauthorized() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    let _ = client.update_program_budget(&1, &5000);
+}
+
+// --- 3. deactivate_program() Tests ---
+
+#[test]
+fn test_deactivate_program_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    let name = String::from_str(&env, "Lifecycle Test");
+    let program_id = client.create_program(&name, &5000).unwrap();
+
+    client.deactivate_program(&program_id).unwrap();
+    
+    let prog = client.get_program(&program_id).unwrap();
+    assert!(!prog.active);
+
+    // Verify deactivation event
+    let events = env.events().all();
+    let (_, topics, _) = events.get(events.len() - 1).unwrap();
+    assert_eq!(
+        topics.get(1).unwrap(),
+        soroban_sdk::Symbol::new(&env, "deactivate_program")
+    );
+}
+
+#[test]
+fn test_deactivate_program_not_found() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    let res = client.try_deactivate_program(&999);
+    assert_eq!(res, Err(Ok(crate::errors::ContractError::ProgramNotFound)));
+}
+
+#[test]
+#[should_panic(expected = "Insufficient approvals")]
+fn test_deactivate_program_unauthorized() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    let _ = client.deactivate_program(&1);
+}
 }
