@@ -105,7 +105,7 @@ fn setup_all<'a>() -> (
 	let dispute_id = env.register(dispute_resolver::DisputeResolverContract, ());
 	let dispute_client = dispute_resolver::DisputeResolverContractClient::new(&env, &dispute_id);
 	let dispute_council = dispute_resolver::types::AdminCouncil { members, threshold: 1 };
-	dispute_client.initialize(&dispute_council, &100u32);
+	dispute_client.initialize(&dispute_council, &relay_id, &100u32);
 
 	(env, relay_client, fee_client, dispute_client, treasury_client, token_client)
 }
@@ -231,7 +231,7 @@ fn test_full_settlement_flow() {
 	let init_proof = create_proof(&env, &initiator_sk, &chain_hash, 20);
 	let resp_proof = create_proof(&env, &respondent_sk, &chain_hash, 10);
 
-	let dispute_id = dispute_client.raise_dispute(&initiator, &tx_id, &init_proof);
+	let dispute_id = dispute_client.raise_dispute(&initiator, &respondent, &tx_id, &init_proof);
 	dispute_client.respond(&respondent, &dispute_id, &resp_proof);
 
 	// Resolve — respondent (carol) should win due to lower sequence
@@ -256,3 +256,6 @@ fn test_full_settlement_flow() {
 	// Fee distribution to Bob should not panic; accept Ok or Err
 	let _ = fee_client.try_distribute(&bob, &2u64, &200u32);
 }
+
+
+

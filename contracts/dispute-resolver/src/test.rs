@@ -1,6 +1,20 @@
 use super::*;
 use crate::types::RelayChainProof;
-use soroban_sdk::{testutils::Address as _, Address, BytesN, Env};
+use soroban_sdk::{contract, contractimpl, testutils::Address as _, Address, BytesN, Env};
+
+#[contract]
+pub struct MockRelayRegistryContract;
+
+#[contractimpl]
+impl MockRelayRegistryContract {
+    pub fn set_active(env: Env, address: Address, active: bool) {
+        env.storage().persistent().set(&address, &active);
+    }
+
+    pub fn is_active(env: Env, address: Address) -> bool {
+        env.storage().persistent().get::<_, bool>(&address).unwrap_or(false)
+    }
+}
 
 fn setup_dispute<'a>(
     env: &'a Env,
@@ -14,6 +28,9 @@ fn setup_dispute<'a>(
     let contract_id = env.register(DisputeResolverContract, ());
     let client = DisputeResolverContractClient::new(env, &contract_id);
 
+    let registry_id = env.register(MockRelayRegistryContract, ());
+    let registry_client = MockRelayRegistryContractClient::new(env, &registry_id);
+
     let admin = Address::generate(env);
     let mut members = soroban_sdk::Vec::new(env);
     members.push_back(admin.clone());
@@ -21,10 +38,14 @@ fn setup_dispute<'a>(
         members,
         threshold: 1,
     };
-    client.initialize(&council, &100);
+    client.initialize(&council, &registry_id, &100);
 
     let initiator = Address::generate(env);
     let respondent = Address::generate(env);
+
+    // Mark both participants active in the mock registry.
+    registry_client.set_active(&initiator, &true);
+    registry_client.set_active(&respondent, &true);
 
     // Generate real Ed25519 keypairs for signing test proofs
     let initiator_sk = ed25519_dalek::SigningKey::from_bytes(&[1u8; 32]);
@@ -77,7 +98,7 @@ fn test_resolve_both_valid_initiator_wins() {
 
     // Initiator proof: seq 10 (lower = better)
     let init_proof = create_proof(&env, &init_sk, &chain_hash, 10);
-    let dispute_id = client.raise_dispute(&initiator, &tx_id, &init_proof);
+    let dispute_id = client.raise_dispute(&initiator, &respondent, &tx_id, &init_proof);
 
     // Respondent proof: seq 15
     let resp_proof = create_proof(&env, &resp_sk, &chain_hash, 15);
@@ -100,7 +121,7 @@ fn test_resolve_both_valid_respondent_wins() {
 
     // Initiator proof: seq 20
     let init_proof = create_proof(&env, &init_sk, &chain_hash, 20);
-    let dispute_id = client.raise_dispute(&initiator, &tx_id, &init_proof);
+    let dispute_id = client.raise_dispute(&initiator, &respondent, &tx_id, &init_proof);
 
     // Respondent proof: seq 15 (lower = better)
     let resp_proof = create_proof(&env, &resp_sk, &chain_hash, 15);
@@ -123,7 +144,7 @@ fn test_resolve_initiator_valid_respondent_invalid() {
 
     // Initiator proof: valid signature
     let init_proof = create_proof(&env, &init_sk, &chain_hash, 20);
-    let dispute_id = client.raise_dispute(&initiator, &tx_id, &init_proof);
+    let dispute_id = client.raise_dispute(&initiator, &respondent, &tx_id, &init_proof);
 
     // Respondent proof: invalid signature (bad bytes)
     let resp_proof = RelayChainProof {
@@ -153,7 +174,7 @@ fn test_resolve_both_invalid() {
         chain_hash: BytesN::from_array(&env, &chain_hash),
         sequence: 10,
     };
-    let dispute_id = client.raise_dispute(&initiator, &tx_id, &init_proof);
+    let dispute_id = client.raise_dispute(&initiator, &respondent, &tx_id, &init_proof);
 
     // Respondent proof: invalid
     let resp_proof = RelayChainProof {
@@ -166,3 +187,6 @@ fn test_resolve_both_invalid() {
     let result = client.try_resolve(&dispute_id);
     assert!(result.is_err());
 }
+
+
+

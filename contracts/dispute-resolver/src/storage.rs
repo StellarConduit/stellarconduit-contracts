@@ -43,6 +43,7 @@ pub enum DataKey {
     Ruling(u64),
     ResolutionWindow,
     AdminCouncil,
+    RegistryAddress,
     TxDispute(BytesN<32>),
     /// Stores the raw 32-byte Ed25519 public key for an Address.
     PublicKey(Address),
@@ -126,6 +127,19 @@ pub fn set_resolution_window(env: &Env, window_ledgers: u32) {
 /// Check if the admin council is set.
 pub fn has_admin_council(env: &Env) -> bool {
     env.storage().instance().has(&DataKey::AdminCouncil)
+}
+
+/// Get the registry contract address.
+pub fn get_registry_address(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&DataKey::RegistryAddress)
+        .unwrap()
+}
+
+/// Set the registry contract address.
+pub fn set_registry_address(env: &Env, address: &Address) {
+    env.storage().instance().set(&DataKey::RegistryAddress, address);
 }
 
 /// Get the admin council.
