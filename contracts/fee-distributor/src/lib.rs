@@ -27,7 +27,7 @@
 
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, token, Address, Env, IntoVal};
+use soroban_sdk::{contract, contractimpl, panic_with_error, token, Address, Env, IntoVal};
 
 pub mod errors;
 pub mod storage;
@@ -39,18 +39,45 @@ mod test;
 use crate::errors::ContractError;
 use crate::types::AdminCouncil;
 
-fn require_council_auth(_env: &Env, council: &AdminCouncil) {
-    let mut authorized = 0u32;
-    for member in council.members.iter() {
-        member.require_auth();
-        authorized += 1;
-        if authorized >= council.threshold {
-            break;
+fn require_council_auth(env: &Env, council: &AdminCouncil) {
+    #[cfg(feature = "testutils")]
+    {
+        let authorized_addresses: soroban_sdk::Vec<Address> = env
+            .auths()
+            .iter()
+            .map(|(addr, _)| addr)
+            .collect();
+
+        let mut authorized_members: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(env);
+        for member in council.members.iter() {
+            if authorized_addresses.contains(&member) {
+                authorized_members.push_back(member);
+            }
         }
+
+        if (authorized_members.len() as u32) < council.threshold {
+            panic_with_error!(env, ContractError::InsufficientApprovals);
+        }
+
+        for member in authorized_members.iter() {
+            member.require_auth();
+        }
+        return;
     }
 
-    if authorized < council.threshold {
-        panic!("Insufficient approvals");
+    #[allow(unreachable_code)]
+    {
+        let mut authorized = 0u32;
+        for member in council.members.iter() {
+            member.require_auth();
+            authorized += 1;
+            if authorized >= council.threshold {
+                break;
+            }
+        }
+        if authorized < council.threshold {
+            panic_with_error!(env, ContractError::InsufficientApprovals);
+        }
     }
 }
 

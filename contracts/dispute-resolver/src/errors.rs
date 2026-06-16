@@ -42,4 +42,6 @@ pub enum ContractError {
     NotInitialized = 13,
     /// Thrown when initialization is attempted after the contract is already initialized.
     AlreadyInitialized = 14,
+    /// Thrown when not enough council members have authorized the action.
+    InsufficientApprovals = 15,
 }

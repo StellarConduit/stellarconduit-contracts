@@ -887,3 +887,132 @@ fn test_claim_preserves_total_earned() {
     assert_eq!(earnings_after.unclaimed, 0);
     assert_eq!(earnings_after.total_claimed, total_earned_before);
 }
+
+// ============================================================================
+// M-of-N Council Auth Tests (set_fee_rate is council-gated)
+// ============================================================================
+
+fn make_council(env: &Env, members: &[&Address], threshold: u32) -> crate::types::AdminCouncil {
+    let mut v = soroban_sdk::Vec::new(env);
+    for m in members {
+        v.push_back((*m).clone());
+    }
+    crate::types::AdminCouncil { members: v, threshold }
+}
+
+fn fee_rate_mock_auth<'a>(
+    env: &'a Env,
+    contract_id: &Address,
+    signer: &'a Address,
+    new_rate: u32,
+) -> MockAuth<'a> {
+    use soroban_sdk::IntoVal;
+    MockAuth {
+        address: signer,
+        invoke: &MockAuthInvoke {
+            contract: contract_id,
+            fn_name: "set_fee_rate",
+            args: (new_rate,).into_val(env),
+            sub_invokes: &[],
+        },
+    }
+}
+
+/// 1-of-3: Carol (position 3) alone can authorize set_fee_rate.
+#[test]
+fn test_council_1_of_3_carol_authorizes() {
+    let env = Env::default();
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+
+    let contract_id = env.register(FeeDistributorContract, ());
+    let client = FeeDistributorContractClient::new(&env, &contract_id);
+
+    let council = make_council(&env, &[&alice, &bob, &carol], 1);
+    client
+        .mock_auths(&[MockAuth {
+            address: &alice,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&council, &50u32, &1000u32, &Address::generate(&env), &Address::generate(&env)).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .initialize(&council, &50u32, &1000u32, &Address::generate(&env), &Address::generate(&env));
+
+    // Only Carol signs.
+    env.mock_auths(&[fee_rate_mock_auth(&env, &contract_id, &carol, 100)]);
+    let result = client.try_set_fee_rate(&100u32);
+    assert_eq!(result, Ok(Ok(())));
+}
+
+/// 2-of-3: Single sig (Alice only) is rejected.
+#[test]
+fn test_council_2_of_3_single_sig_rejected() {
+    let env = Env::default();
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+
+    let contract_id = env.register(FeeDistributorContract, ());
+    let client = FeeDistributorContractClient::new(&env, &contract_id);
+    let treasury = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    let council = make_council(&env, &[&alice, &bob, &carol], 2);
+    env.mock_all_auths();
+    client.initialize(&council, &50u32, &1000u32, &treasury, &token);
+
+    env.mock_auths(&[fee_rate_mock_auth(&env, &contract_id, &alice, 100)]);
+    let result = client.try_set_fee_rate(&100u32);
+    assert_eq!(result, Err(Ok(ContractError::InsufficientApprovals)));
+}
+
+/// 2-of-3: Bob + Carol (neither is first) succeed.
+#[test]
+fn test_council_2_of_3_bob_and_carol_succeed() {
+    let env = Env::default();
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+
+    let contract_id = env.register(FeeDistributorContract, ());
+    let client = FeeDistributorContractClient::new(&env, &contract_id);
+    let treasury = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    let council = make_council(&env, &[&alice, &bob, &carol], 2);
+    env.mock_all_auths();
+    client.initialize(&council, &50u32, &1000u32, &treasury, &token);
+
+    env.mock_auths(&[
+        fee_rate_mock_auth(&env, &contract_id, &bob, 100),
+        fee_rate_mock_auth(&env, &contract_id, &carol, 100),
+    ]);
+    let result = client.try_set_fee_rate(&100u32);
+    assert_eq!(result, Ok(Ok(())));
+}
+
+/// No signatures → InsufficientApprovals regardless of threshold.
+#[test]
+fn test_council_no_sigs_rejected() {
+    let env = Env::default();
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+
+    let contract_id = env.register(FeeDistributorContract, ());
+    let client = FeeDistributorContractClient::new(&env, &contract_id);
+    let treasury = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    let council = make_council(&env, &[&alice, &bob, &carol], 1);
+    env.mock_all_auths();
+    client.initialize(&council, &50u32, &1000u32, &treasury, &token);
+
+    // No mock_auths at all.
+    let result = client.try_set_fee_rate(&100u32);
+    assert_eq!(result, Err(Ok(ContractError::InsufficientApprovals)));
+}

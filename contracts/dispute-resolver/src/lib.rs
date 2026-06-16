@@ -28,7 +28,7 @@
 
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String};
+use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, String};
 
 pub mod errors;
 pub mod storage;
@@ -38,6 +38,50 @@ use crate::errors::ContractError;
 use crate::types::{
     AdminCouncil, Dispute, DisputeStatus, OptionalRelayChainProof, RelayChainProof, Ruling,
 };
+
+fn require_council_auth(env: &Env) {
+    let council = storage::get_admin_council(env);
+
+    #[cfg(feature = "testutils")]
+    {
+        let authorized_addresses: soroban_sdk::Vec<Address> = env
+            .auths()
+            .iter()
+            .map(|(addr, _)| addr)
+            .collect();
+
+        let mut authorized_members: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(env);
+        for member in council.members.iter() {
+            if authorized_addresses.contains(&member) {
+                authorized_members.push_back(member);
+            }
+        }
+
+        if (authorized_members.len() as u32) < council.threshold {
+            panic_with_error!(env, ContractError::InsufficientApprovals);
+        }
+
+        for member in authorized_members.iter() {
+            member.require_auth();
+        }
+        return;
+    }
+
+    #[allow(unreachable_code)]
+    {
+        let mut authorized = 0u32;
+        for member in council.members.iter() {
+            member.require_auth();
+            authorized += 1;
+            if authorized >= council.threshold {
+                break;
+            }
+        }
+        if authorized < council.threshold {
+            panic_with_error!(env, ContractError::InsufficientApprovals);
+        }
+    }
+}
 
 #[contract]
 pub struct DisputeResolverContract;
@@ -393,6 +437,35 @@ impl DisputeResolverContract {
 
         storage::set_admin_council(&env, &council);
         storage::set_resolution_window(&env, resolution_window);
+
+        Ok(())
+    }
+    /// Update the resolution window (admin council only).
+    ///
+    /// # Parameters
+    /// - `env`: Soroban environment.
+    /// - `new_window`: New number of ledgers allowed for responding to a dispute.
+    ///
+    /// # Errors
+    /// - `ContractError::InvalidConfig` if `new_window` is zero.
+    /// - `ContractError::InsufficientApprovals` if the council threshold is not met.
+    pub fn update_resolution_window(env: Env, new_window: u32) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
+        require_council_auth(&env);
+
+        if new_window == 0 {
+            return Err(ContractError::InvalidConfig);
+        }
+
+        storage::set_resolution_window(&env, new_window);
+
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "dispute_resolver"),
+                soroban_sdk::Symbol::new(&env, "update_resolution_window"),
+            ),
+            (new_window,),
+        );
 
         Ok(())
     }

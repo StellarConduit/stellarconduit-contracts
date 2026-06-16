@@ -502,3 +502,157 @@ fn test_get_treasury_stats_full_lifecycle() {
     assert_eq!(stats.lifetime_withdrawn, 3000);
     assert_eq!(stats.lifetime_allocated, 4000);
 }
+
+// ============================================================================
+// M-of-N Council Auth Tests
+// ============================================================================
+
+fn treasury_make_council(env: &Env, members: &[&Address], threshold: u32) -> crate::types::AdminCouncil {
+    let mut v = soroban_sdk::Vec::new(env);
+    for m in members {
+        v.push_back((*m).clone());
+    }
+    crate::types::AdminCouncil { members: v, threshold }
+}
+
+fn withdraw_mock_auth<'a>(
+    env: &'a Env,
+    contract_id: &Address,
+    signer: &'a Address,
+    to: &'a Address,
+    amount: i128,
+) -> MockAuth<'a> {
+    use soroban_sdk::IntoVal;
+    MockAuth {
+        address: signer,
+        invoke: &MockAuthInvoke {
+            contract: contract_id,
+            fn_name: "withdraw",
+            args: (to.clone(), amount, String::from_str(env, "test")).into_val(env),
+            sub_invokes: &[],
+        },
+    }
+}
+
+/// Setup a treasury with a pre-funded balance and a 3-member council.
+fn setup_treasury_council<'a>(
+    env: &'a Env,
+    alice: &Address,
+    bob: &Address,
+    carol: &Address,
+    threshold: u32,
+) -> (TreasuryContractClient<'a>, Address) {
+    let client = create_treasury_contract(env);
+    let contract_id = client.address.clone();
+
+    let (token_client, token_address) = create_token_contract(env, alice);
+    token_client.mint(alice, &10000);
+
+    let council = treasury_make_council(env, &[alice, bob, carol], threshold);
+    env.as_contract(&contract_id, || {
+        storage::set_admin_council(env, &council);
+        storage::set_token_address(env, &token_address);
+    });
+
+    // Deposit funds so withdraw can be tested.
+    env.mock_auths(&[MockAuth {
+        address: alice,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "deposit",
+            args: (alice.clone(), 5000_i128).into_val(env),
+            sub_invokes: &[MockAuthInvoke {
+                contract: &token_address,
+                fn_name: "transfer",
+                args: (alice.clone(), contract_id.clone(), 5000_i128).into_val(env),
+                sub_invokes: &[],
+            }],
+        },
+    }]);
+    client.deposit(alice, &5000);
+
+    (client, token_address)
+}
+
+/// 1-of-3: Carol (position 3) alone can authorize withdraw.
+#[test]
+fn test_treasury_council_1_of_3_carol_authorizes() {
+    let env = Env::default();
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+    let to = Address::generate(&env);
+
+    let (client, token_address) = setup_treasury_council(&env, &alice, &bob, &carol, 1);
+
+    env.mock_auths(&[withdraw_mock_auth(
+        &env,
+        &client.address,
+        &carol,
+        &to,
+        1000,
+    )]);
+
+    let result = client.try_withdraw(&to, &1000, &String::from_str(&env, "test"));
+    assert_eq!(result, Ok(Ok(())));
+    drop(token_address);
+}
+
+/// 2-of-3: Single sig (Alice) is rejected.
+#[test]
+fn test_treasury_council_2_of_3_single_sig_rejected() {
+    let env = Env::default();
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+    let to = Address::generate(&env);
+
+    let (client, _token_address) = setup_treasury_council(&env, &alice, &bob, &carol, 2);
+
+    env.mock_auths(&[withdraw_mock_auth(
+        &env,
+        &client.address,
+        &alice,
+        &to,
+        1000,
+    )]);
+
+    let result = client.try_withdraw(&to, &1000, &String::from_str(&env, "test"));
+    assert_eq!(result, Err(Ok(crate::errors::ContractError::InsufficientApprovals)));
+}
+
+/// 2-of-3: Bob + Carol (neither first in Vec) succeed.
+#[test]
+fn test_treasury_council_2_of_3_bob_and_carol_succeed() {
+    let env = Env::default();
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+    let to = Address::generate(&env);
+
+    let (client, _token_address) = setup_treasury_council(&env, &alice, &bob, &carol, 2);
+
+    env.mock_auths(&[
+        withdraw_mock_auth(&env, &client.address, &bob, &to, 1000),
+        withdraw_mock_auth(&env, &client.address, &carol, &to, 1000),
+    ]);
+
+    let result = client.try_withdraw(&to, &1000, &String::from_str(&env, "test"));
+    assert_eq!(result, Ok(Ok(())));
+}
+
+/// No signatures → InsufficientApprovals.
+#[test]
+fn test_treasury_council_no_sigs_rejected() {
+    let env = Env::default();
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+    let to = Address::generate(&env);
+
+    let (client, _token_address) = setup_treasury_council(&env, &alice, &bob, &carol, 1);
+
+    // No mock_auths at all.
+    let result = client.try_withdraw(&to, &1000, &String::from_str(&env, "test"));
+    assert_eq!(result, Err(Ok(crate::errors::ContractError::InsufficientApprovals)));
+}
