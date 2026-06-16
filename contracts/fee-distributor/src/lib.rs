@@ -352,4 +352,31 @@ impl FeeDistributorContract {
 
         Ok(())
     }
+
+    /// Upgrade the contract WASM bytecode.
+    ///
+    /// This function allows the admin to deploy a new WASM implementation
+    /// without changing the contract address, preserving all state.
+    ///
+    /// # Parameters
+    /// - `env`: Soroban environment.
+    /// - `new_wasm_hash`: The 32-byte hash of the new WASM implementation.
+    ///
+    /// # Errors
+    /// - Auth error if caller is not the admin.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) -> Result<(), ContractError> {
+        let config = storage::get_fee_config(&env);
+        config.admin.require_auth();
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.events().publish(("upgrade",), (new_wasm_hash,));
+        Ok(())
+    }
+
+    /// Returns the current contract version.
+    ///
+    /// This is a hardcoded version number that should be incremented
+    /// after each upgrade to verify the upgrade was successful.
+    pub fn version() -> u32 {
+        1
+    }
 }

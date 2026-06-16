@@ -887,3 +887,21 @@ fn test_claim_preserves_total_earned() {
     assert_eq!(earnings_after.unclaimed, 0);
     assert_eq!(earnings_after.total_claimed, total_earned_before);
 }
+
+// ============================================================================
+// upgrade() and version() Tests
+// ============================================================================
+
+#[test]
+fn test_version() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(FeeDistributorContract, ());
+    let client = FeeDistributorContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    client.initialize(&admin, &50u32, &1000u32, &treasury);
+
+    // Test version returns 1
+    assert_eq!(client.version(), 1);
+}
