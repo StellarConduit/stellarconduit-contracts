@@ -22,7 +22,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32v1-none,wasm32-unknown-unknown
+          targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
       # Step 3: Cache Rust dependencies
@@ -60,7 +60,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32v1-none,wasm32-unknown-unknown
+          targets: wasm32-unknown-unknown
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
@@ -75,7 +75,7 @@ jobs:
         run: |
           wasms=$(
             {
-              for dir in target/wasm32v1-none/release target/wasm32-unknown-unknown/release; do
+              for dir in target/wasm32-unknown-unknown/release; do
                 if [ -d "$dir" ]; then
                   find "$dir" -maxdepth 1 -name '*.wasm' -type f
                 fi
@@ -100,7 +100,7 @@ jobs:
         run: |
           wasms=$(
             {
-              for dir in target/wasm32v1-none/release target/wasm32-unknown-unknown/release; do
+              for dir in target/wasm32-unknown-unknown/release; do
                 if [ -d "$dir" ]; then
                   find "$dir" -maxdepth 1 -name '*.wasm' -type f
                 fi
