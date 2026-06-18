@@ -738,14 +738,8 @@ fn setup_initialized_treasury<'a>(env: &Env, admin: &Address) -> TreasuryContrac
         members,
         threshold: 1,
     };
-    
-    env.as_contract(&client.address, || {
-        storage::set_admin_council(env, &council);
-    });
-
     let (_, token_address) = create_token_contract(env, admin);
-    env.as_contract(&client.address, || {
-        storage::set_token_address(env, &token_address);
-    });
+    
+    client.initialize(&council, &token_address).unwrap();
     client
-} // <--- Closes setup_initialized_treasury
+}
