@@ -728,5 +728,24 @@ fn test_deactivate_program_unauthorized() {
     let client = setup_initialized_treasury(&env, &admin);
 
     let _ = client.deactivate_program(&1);
-}
-}
+} // <--- Closes test_deactivate_program_unauthorized
+
+fn setup_initialized_treasury<'a>(env: &Env, admin: &Address) -> TreasuryContractClient<'a> {
+    let client = create_treasury_contract(env);
+    let mut members = soroban_sdk::Vec::new(env);
+    members.push_back(admin.clone());
+    let council = crate::types::AdminCouncil {
+        members,
+        threshold: 1,
+    };
+    
+    env.as_contract(&client.address, || {
+        storage::set_admin_council(env, &council);
+    });
+
+    let (_, token_address) = create_token_contract(env, admin);
+    env.as_contract(&client.address, || {
+        storage::set_token_address(env, &token_address);
+    });
+    client
+} // <--- Closes setup_initialized_treasury
