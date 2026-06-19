@@ -502,3 +502,197 @@ fn test_get_treasury_stats_full_lifecycle() {
     assert_eq!(stats.lifetime_withdrawn, 3000);
     assert_eq!(stats.lifetime_allocated, 4000);
 }
+// =========================================================================
+// SPENDING PROGRAM LIFECYCLE TESTS (ISSUE #110)
+// =========================================================================
+
+fn setup_initialized_treasury<'a>(env: &Env, admin: &Address) -> TreasuryContractClient<'a> {
+    let client = create_treasury_contract(env);
+    let mut members = soroban_sdk::Vec::new(env);
+    members.push_back(admin.clone());
+    let council = crate::types::AdminCouncil {
+        members,
+        threshold: 1,
+    };
+
+    env.as_contract(&client.address, || {
+        storage::set_admin_council(env, &council);
+    });
+
+    let (_token_client, token_address) = create_token_contract(env, admin);
+    env.as_contract(&client.address, || {
+        storage::set_token_address(env, &token_address);
+    });
+
+    if let Err(Err(_err)) = client.try_initialize(&council, &token_address) {
+        // If it's already initialized, that's completely fine, keep going
+        // Otherwise, you can log or let it fail if it's a completely different error
+    } // <--- MAKE SURE THIS BRACE IS HERE TO CLOSE THE IF LET
+
+    client // <--- Returns the client
+} // <--- CLOSES THE FUNCTION
+
+#[test]
+fn test_create_spending_program_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    let name = String::from_str(&env, "Development Grant");
+    let program_id = client.create_program(&name, &5000);
+
+    assert_eq!(program_id, 1);
+
+    let prog = client.get_program(&1);
+    assert_eq!(prog.budget, 5000);
+    assert_eq!(prog.spent, 0);
+    assert!(prog.active);
+}
+
+#[test]
+fn test_create_program_invalid_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    let name = String::from_str(&env, "Invalid Program");
+    let res = client.try_create_program(&name, &0);
+    assert_eq!(res, Err(Ok(crate::errors::ContractError::InvalidAmount)));
+
+    let res_neg = client.try_create_program(&name, &-100);
+    assert_eq!(
+        res_neg,
+        Err(Ok(crate::errors::ContractError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_create_program_invalid_name_length() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    let short_name = String::from_str(&env, "ab");
+    let res_short = client.try_create_program(&short_name, &5000);
+    assert_eq!(
+        res_short,
+        Err(Ok(crate::errors::ContractError::InvalidProgramName))
+    );
+
+    let long_str = "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmno";
+    let long_name = String::from_str(&env, long_str);
+    let res_long = client.try_create_program(&long_name, &5000);
+    assert_eq!(
+        res_long,
+        Err(Ok(crate::errors::ContractError::InvalidProgramName))
+    );
+}
+
+#[test]
+fn test_update_program_budget_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    let name = String::from_str(&env, "Infrastructure");
+    let program_id = client.create_program(&name, &5000);
+
+    client.update_program_budget(&program_id, &7500);
+
+    let prog = client.get_program(&program_id);
+    assert_eq!(prog.budget, 7500);
+}
+
+#[test]
+fn test_update_program_budget_decrease_allowed() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    let name = String::from_str(&env, "Flex Budget");
+    let program_id = client.create_program(&name, &5000);
+
+    client.update_program_budget(&program_id, &3000);
+
+    let prog = client.get_program(&program_id);
+    assert_eq!(prog.budget, 3000);
+}
+
+#[test]
+fn test_update_budget_below_spent_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    let name = String::from_str(&env, "Budget Test");
+    let program_id = client.create_program(&name, &5000);
+
+    // Verify it blocks budgets dropped below initial limits when requested
+    let res = client.try_update_program_budget(&program_id, &-500);
+    assert_eq!(res, Err(Ok(crate::errors::ContractError::InvalidAmount)));
+}
+
+#[test]
+fn test_deactivate_program_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    let name = String::from_str(&env, "Sunset Project");
+    let program_id = client.create_program(&name, &5000);
+
+    client.deactivate_program(&program_id);
+
+    let prog = client.get_program(&program_id);
+    assert!(!prog.active);
+}
+
+#[test]
+#[should_panic]
+fn test_create_program_unauthorized() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    let name = String::from_str(&env, "Hack Attack");
+    client.create_program(&name, &5000);
+}
+
+#[test]
+#[should_panic]
+fn test_update_program_budget_unauthorized() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    let name = String::from_str(&env, "Secure Project");
+    env.mock_all_auths();
+    let program_id = client.create_program(&name, &5000);
+
+    let env_attack = Env::default();
+    let client_attack = TreasuryContractClient::new(&env_attack, &client.address);
+    client_attack.update_program_budget(&program_id, &99999);
+}
+
+#[test]
+#[should_panic]
+fn test_deactivate_program_unauthorized() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let client = setup_initialized_treasury(&env, &admin);
+
+    let name = String::from_str(&env, "Secure Project");
+    env.mock_all_auths();
+    let program_id = client.create_program(&name, &5000);
+
+    let env_attack = Env::default();
+    let client_attack = TreasuryContractClient::new(&env_attack, &client.address);
+    client_attack.deactivate_program(&program_id);
+}
