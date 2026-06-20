@@ -1,5 +1,5 @@
 [package]
-name = "fee-distributor"
+name = "emergency-pause"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -12,8 +12,8 @@ soroban-sdk = { workspace = true }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
-treasury = { path = "../treasury" }
-emergency-pause = { path = "../emergency-pause", features = ["testutils"] }
+relay-registry = { path = "../relay-registry", features = ["testutils"] }
+fee-distributor = { path = "../fee-distributor", features = ["testutils"] }
 
 [features]
 testutils = ["soroban-sdk/testutils"]

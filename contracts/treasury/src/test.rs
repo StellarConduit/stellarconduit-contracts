@@ -178,6 +178,12 @@ fn test_allocate_by_admin() {
     let (token_client, token_address) = create_token_contract(&env, &admin);
     token_client.mint(&admin, &20000);
 
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut pm = soroban_sdk::Vec::new(&env);
+    pm.push_back(admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id)
+        .initialize(&emergency_pause::types::AdminCouncil { members: pm, threshold: 1 });
+
     env.as_contract(&client.address, || {
         let mut members = soroban_sdk::Vec::new(&env);
         members.push_back(admin.clone());
@@ -187,6 +193,7 @@ fn test_allocate_by_admin() {
         };
         storage::set_admin_council(&env, &council);
         storage::set_token_address(&env, &token_address);
+        storage::set_pause_contract_address(&env, &pause_id);
         let program = SpendingProgram {
             program_id: 1,
             name: String::from_str(&env, "Test Program"),
@@ -208,6 +215,22 @@ fn test_allocate_by_admin() {
     assert_eq!(bal, 8000);
 }
 
+fn setup_allocate_context<'a>(env: &Env, client: &TreasuryContractClient<'a>, admin: &Address, token_address: &Address) {
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut pm = soroban_sdk::Vec::new(env);
+    pm.push_back(admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(env, &pause_id)
+        .initialize(&emergency_pause::types::AdminCouncil { members: pm, threshold: 1 });
+    env.as_contract(&client.address, || {
+        let mut members = soroban_sdk::Vec::new(env);
+        members.push_back(admin.clone());
+        let council = crate::types::AdminCouncil { members, threshold: 1 };
+        storage::set_admin_council(env, &council);
+        storage::set_token_address(env, token_address);
+        storage::set_pause_contract_address(env, &pause_id);
+    });
+}
+
 #[test]
 fn test_allocate_program_not_found() {
     let env = Env::default();
@@ -218,16 +241,7 @@ fn test_allocate_program_not_found() {
     let (token_client, token_address) = create_token_contract(&env, &admin);
     token_client.mint(&admin, &20000);
 
-    env.as_contract(&client.address, || {
-        let mut members = soroban_sdk::Vec::new(&env);
-        members.push_back(admin.clone());
-        let council = crate::types::AdminCouncil {
-            members,
-            threshold: 1,
-        };
-        storage::set_admin_council(&env, &council);
-        storage::set_token_address(&env, &token_address);
-    });
+    setup_allocate_context(&env, &client, &admin, &token_address);
     client.deposit(&admin, &10000);
 
     let res = client.try_allocate(&99, &1000);
@@ -244,21 +258,14 @@ fn test_allocate_program_inactive() {
     let (token_client, token_address) = create_token_contract(&env, &admin);
     token_client.mint(&admin, &20000);
 
+    setup_allocate_context(&env, &client, &admin, &token_address);
     env.as_contract(&client.address, || {
-        let mut members = soroban_sdk::Vec::new(&env);
-        members.push_back(admin.clone());
-        let council = crate::types::AdminCouncil {
-            members,
-            threshold: 1,
-        };
-        storage::set_admin_council(&env, &council);
-        storage::set_token_address(&env, &token_address);
         let program = SpendingProgram {
             program_id: 1,
             name: String::from_str(&env, "Test Program"),
             budget: 5000,
             spent: 0,
-            active: false, // inactive
+            active: false,
         };
         storage::set_spending_program(&env, 1, program);
     });
@@ -278,15 +285,8 @@ fn test_allocate_over_budget() {
     let (token_client, token_address) = create_token_contract(&env, &admin);
     token_client.mint(&admin, &20000);
 
+    setup_allocate_context(&env, &client, &admin, &token_address);
     env.as_contract(&client.address, || {
-        let mut members = soroban_sdk::Vec::new(&env);
-        members.push_back(admin.clone());
-        let council = crate::types::AdminCouncil {
-            members,
-            threshold: 1,
-        };
-        storage::set_admin_council(&env, &council);
-        storage::set_token_address(&env, &token_address);
         let program = SpendingProgram {
             program_id: 1,
             name: String::from_str(&env, "Test Program"),
@@ -315,15 +315,8 @@ fn test_allocate_insufficient_treasury_balance() {
     let (token_client, token_address) = create_token_contract(&env, &admin);
     token_client.mint(&admin, &20000);
 
+    setup_allocate_context(&env, &client, &admin, &token_address);
     env.as_contract(&client.address, || {
-        let mut members = soroban_sdk::Vec::new(&env);
-        members.push_back(admin.clone());
-        let council = crate::types::AdminCouncil {
-            members,
-            threshold: 1,
-        };
-        storage::set_admin_council(&env, &council);
-        storage::set_token_address(&env, &token_address);
         let program = SpendingProgram {
             program_id: 1,
             name: String::from_str(&env, "Test Program"),
@@ -333,7 +326,7 @@ fn test_allocate_insufficient_treasury_balance() {
         };
         storage::set_spending_program(&env, 1, program);
     });
-    client.deposit(&admin, &3000); // Not enough for the allocation
+    client.deposit(&admin, &3000);
 
     let res = client.try_allocate(&1, &5000);
     assert_eq!(
@@ -426,15 +419,8 @@ fn test_get_treasury_stats_after_allocate() {
     let (token_client, token_address) = create_token_contract(&env, &admin);
     token_client.mint(&admin, &20000);
 
+    setup_allocate_context(&env, &client, &admin, &token_address);
     env.as_contract(&client.address, || {
-        let mut members = soroban_sdk::Vec::new(&env);
-        members.push_back(admin.clone());
-        let council = crate::types::AdminCouncil {
-            members,
-            threshold: 1,
-        };
-        storage::set_admin_council(&env, &council);
-        storage::set_token_address(&env, &token_address);
         let program = SpendingProgram {
             program_id: 1,
             name: String::from_str(&env, "Test Program"),
@@ -466,15 +452,8 @@ fn test_get_treasury_stats_full_lifecycle() {
     let (token_client, token_address) = create_token_contract(&env, &admin);
     token_client.mint(&admin, &50000);
 
+    setup_allocate_context(&env, &client, &admin, &token_address);
     env.as_contract(&client.address, || {
-        let mut members = soroban_sdk::Vec::new(&env);
-        members.push_back(admin.clone());
-        let council = crate::types::AdminCouncil {
-            members,
-            threshold: 1,
-        };
-        storage::set_admin_council(&env, &council);
-        storage::set_token_address(&env, &token_address);
         let program = SpendingProgram {
             program_id: 1,
             name: String::from_str(&env, "Test Program"),

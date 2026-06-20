@@ -28,7 +28,7 @@
 
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String};
+use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, String};
 
 pub mod errors;
 pub mod storage;
@@ -38,6 +38,18 @@ use crate::errors::ContractError;
 use crate::types::{
     AdminCouncil, Dispute, DisputeStatus, OptionalRelayChainProof, RelayChainProof, Ruling,
 };
+
+fn require_not_paused(env: &Env) {
+    let pause_addr = storage::get_pause_contract_address(env);
+    let is_paused: bool = env.invoke_contract(
+        &pause_addr,
+        &soroban_sdk::Symbol::new(env, "is_paused"),
+        soroban_sdk::Vec::new(env),
+    );
+    if is_paused {
+        panic_with_error!(env, ContractError::ProtocolPaused);
+    }
+}
 
 #[contract]
 pub struct DisputeResolverContract;
@@ -66,6 +78,7 @@ impl DisputeResolverContract {
         proof: RelayChainProof,
     ) -> Result<u64, ContractError> {
         storage::extend_instance_ttl(&env);
+        require_not_paused(&env);
         initiator.require_auth();
 
         if initiator == respondent {
@@ -131,6 +144,7 @@ impl DisputeResolverContract {
         proof: RelayChainProof,
     ) -> Result<(), ContractError> {
         storage::extend_instance_ttl(&env);
+        require_not_paused(&env);
         respondent.require_auth();
 
         let mut dispute =
@@ -185,6 +199,7 @@ impl DisputeResolverContract {
     /// - `ContractError::NotResponded` if the dispute status is unexpected.
     pub fn resolve(env: Env, dispute_id: u64) -> Result<Ruling, ContractError> {
         storage::extend_instance_ttl(&env);
+        require_not_paused(&env);
         let mut dispute =
             storage::get_dispute(&env, dispute_id).ok_or(ContractError::DisputeNotFound)?;
 
@@ -382,6 +397,7 @@ impl DisputeResolverContract {
         env: Env,
         council: AdminCouncil,
         resolution_window: u32,
+        pause_contract_address: Address,
     ) -> Result<(), ContractError> {
         storage::extend_instance_ttl(&env);
         if storage::has_admin_council(&env) {
@@ -398,6 +414,7 @@ impl DisputeResolverContract {
 
         storage::set_admin_council(&env, &council);
         storage::set_resolution_window(&env, resolution_window);
+        storage::set_pause_contract_address(&env, &pause_contract_address);
 
         Ok(())
     }

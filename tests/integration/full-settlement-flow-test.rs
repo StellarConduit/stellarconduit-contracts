@@ -3,38 +3,6 @@
 //! End-to-end integration test that simulates a complete StellarConduit settlement
 //! flow across all four contracts. This test exercises the full happy-path lifecycle:
 //! relay node registration → transaction settlement → fee distribution → dispute (if needed).
-//!
-//! ## Flow to implement
-//!
-//! ### Phase 1: Node Setup
-//! - Deploy all four contracts in a Soroban test environment
-//! - Register two relay nodes (node_a and node_b) via the Relay Registry
-//! - Stake tokens for both nodes to reach active status
-//!
-//! ### Phase 2: Transaction Settlement
-//! - Simulate node_a submitting a batch of mesh transactions to Stellar
-//! - Confirm settlement (mock the transaction confirmation)
-//! - Call `fee_distributor.distribute(node_a, batch_id)` to trigger fee distribution
-//!
-//! ### Phase 3: Fee Verification
-//! - Verify node_a's earnings record is updated correctly
-//! - Verify the treasury received its configured share
-//! - Call `fee_distributor.claim(node_a)` and verify tokens transferred
-//!
-//! ### Phase 4: Dispute Simulation (Optional Branch)
-//! - Simulate a conflicting submission from node_b for the same transaction
-//! - node_a raises a dispute via `dispute_resolver.raise_dispute(tx_id, proof_a)`
-//! - node_b responds with `dispute_resolver.respond(dispute_id, proof_b)`
-//! - Fast-forward ledger past the resolution window
-//! - Resolve the dispute and verify the correct node wins
-//! - Verify the losing node's stake is slashed in the Relay Registry
-//!
-//! ### Phase 5: Teardown Assertions
-//! - Verify final balances for both nodes match expected states
-//! - Verify treasury balance includes the correct accumulated share
-//! - Verify all history entries are correctly recorded
-//!
-//! implementation tracked in GitHub issue
 
 extern crate std;
 
@@ -50,9 +18,9 @@ fn setup_all<'a>() -> (
 	dispute_resolver::DisputeResolverContractClient<'a>,
 	treasury::TreasuryContractClient<'a>,
 	token::StellarAssetClient<'a>,
+	emergency_pause::EmergencyPauseContractClient<'a>,
 ) {
 	let env = Env::default();
-	// Allow all require_auth checks in tests
 	env.mock_all_auths();
 
 	// Deploy mock SAC token
@@ -61,17 +29,27 @@ fn setup_all<'a>() -> (
 	let token_id = token_contract.address();
 	let token_client = token::StellarAssetClient::new(&env, &token_id);
 
-	// Deploy treasury and initialize
-	let treasury_id = env.register(treasury::TreasuryContract, ());
-	let treasury_client = treasury::TreasuryContractClient::new(&env, &treasury_id);
 	let admin = Address::generate(&env);
 	let mut members = soroban_sdk::Vec::new(&env);
 	members.push_back(admin.clone());
-	let council = treasury::types::AdminCouncil {
+
+	// Deploy emergency-pause and initialize
+	let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+	let pause_client = emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id);
+	let pause_council = emergency_pause::types::AdminCouncil {
 		members: members.clone(),
 		threshold: 1,
 	};
-	treasury_client.initialize(&council, &token_id);
+	pause_client.initialize(&pause_council);
+
+	// Deploy treasury and initialize
+	let treasury_id = env.register(treasury::TreasuryContract, ());
+	let treasury_client = treasury::TreasuryContractClient::new(&env, &treasury_id);
+	let treasury_council = treasury::types::AdminCouncil {
+		members: members.clone(),
+		threshold: 1,
+	};
+	treasury_client.initialize(&treasury_council, &token_id, &pause_id);
 
 	// Deploy fee distributor and initialize
 	let fee_id = env.register(fee_distributor::FeeDistributorContract, ());
@@ -81,7 +59,7 @@ fn setup_all<'a>() -> (
 		threshold: 1,
 	};
 	// fee_rate_bps = 100 (1%), treasury_share_bps = 1000 (10%)
-	fee_client.initialize(&fee_council, &100u32, &1000u32, &treasury_id, &token_id);
+	fee_client.initialize(&fee_council, &100u32, &1000u32, &treasury_id, &token_id, &pause_id);
 
 	// Mint some tokens to fee distributor so treasury transfers can succeed
 	token_client.mint(&fee_id, &1_000_000);
@@ -94,7 +72,7 @@ fn setup_all<'a>() -> (
 		threshold: 1,
 	};
 	// min_stake = 100, stake_lock_period = 10 ledgers
-	relay_client.initialize(&relay_council, &100i128, &10u32);
+	relay_client.initialize(&relay_council, &100i128, &10u32, &pause_id);
 
 	// Set token address in relay registry storage (init doesn't take token address)
 	env.as_contract(&relay_client.address, || {
@@ -105,9 +83,9 @@ fn setup_all<'a>() -> (
 	let dispute_id = env.register(dispute_resolver::DisputeResolverContract, ());
 	let dispute_client = dispute_resolver::DisputeResolverContractClient::new(&env, &dispute_id);
 	let dispute_council = dispute_resolver::types::AdminCouncil { members, threshold: 1 };
-	dispute_client.initialize(&dispute_council, &100u32);
+	dispute_client.initialize(&dispute_council, &100u32, &pause_id);
 
-	(env, relay_client, fee_client, dispute_client, treasury_client, token_client)
+	(env, relay_client, fee_client, dispute_client, treasury_client, token_client, pause_client)
 }
 
 #[test]
@@ -119,6 +97,7 @@ fn test_full_settlement_flow() {
 		dispute_client,
 		treasury_client,
 		token_client,
+		_pause_client,
 	) = setup_all();
 
 	// ----------------------
@@ -173,7 +152,6 @@ fn test_full_settlement_flow() {
 	assert_eq!(earnings.unclaimed, 1);
 
 	// Verify treasury received its share (treasury_share_bps = 1000 => 10%)
-	// For fee=1, treasury_share = 0 due to integer division; test that treasury balance is non-negative and present
 	let treasury_balance = treasury_client.get_balance();
 	assert!(treasury_balance >= 0);
 
@@ -208,7 +186,6 @@ fn test_full_settlement_flow() {
 	// ----------------------
 	// Phase 5 — Dispute Resolution
 	// ----------------------
-	// Use dispute test helpers pattern to register public keys
 	let initiator = bob.clone();
 	let respondent = carol.clone();
 
@@ -226,7 +203,6 @@ fn test_full_settlement_flow() {
 		dispute_resolver::storage::set_public_key(&env, &respondent, &respondent_pk);
 	});
 
-	// Create proofs: initiator sequence higher -> respondent (carol) wins with lower sequence
 	fn create_proof(env: &Env, sk: &ed25519_dalek::SigningKey, chain_hash_bytes: &[u8; 32], sequence: u64) -> dispute_resolver::types::RelayChainProof {
 		use ed25519_dalek::Signer;
 		let sig = sk.sign(chain_hash_bytes.as_slice());
@@ -254,7 +230,6 @@ fn test_full_settlement_flow() {
 	// ----------------------
 	// Phase 6 — Slash and Recovery
 	// ----------------------
-	// Admin (mocked) slashes Bob
 	relay_client.slash(&bob, &String::from_str(&env, "misbehavior"));
 
 	let bob_node = relay_client.get_node(&bob);
@@ -262,6 +237,56 @@ fn test_full_settlement_flow() {
 	assert!(matches!(bob_node.status, relay_registry::types::NodeStatus::Slashed));
 	assert!(!relay_client.is_active(&bob));
 
-	// Fee distribution to Bob should not panic; accept Ok or Err
 	let _ = fee_client.try_distribute(&bob, &2u64, &200u32);
+}
+
+#[test]
+fn test_pause_blocks_protocol_operations() {
+	let (
+		env,
+		relay_client,
+		fee_client,
+		_dispute_client,
+		_treasury_client,
+		token_client,
+		pause_client,
+	) = setup_all();
+
+	let node = Address::generate(&env);
+	token_client.mint(&node, &1000);
+	relay_client.register(
+		&node,
+		&NodeMetadata {
+			region: String::from_str(&env, "eu-west"),
+			capacity: 500,
+			uptime_commitment: 95,
+		},
+	);
+
+	// Pause the protocol
+	pause_client.pause(&String::from_str(&env, "security incident"));
+	assert!(pause_client.is_paused());
+
+	// stake() is blocked
+	let stake_result = relay_client.try_stake(&node, &200i128);
+	assert_eq!(
+		stake_result,
+		Err(Ok(relay_registry::errors::ContractError::ProtocolPaused))
+	);
+
+	// claim() is blocked
+	let relay_addr = Address::generate(&env);
+	let claim_result = fee_client.try_claim(&relay_addr);
+	assert_eq!(
+		claim_result,
+		Err(Ok(fee_distributor::errors::ContractError::ProtocolPaused))
+	);
+
+	// Unpause and verify operations resume
+	pause_client.unpause();
+	assert!(!pause_client.is_paused());
+
+	// stake() now succeeds
+	relay_client.stake(&node, &200i128);
+	assert!(relay_client.is_active(&node));
 }

@@ -9,6 +9,16 @@ use soroban_sdk::{
     token, Address, Env, String,
 };
 
+fn make_pause(env: &Env, admin: &Address) -> Address {
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut m = soroban_sdk::Vec::new(env);
+    m.push_back(admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(env, &pause_id).initialize(
+        &emergency_pause::types::AdminCouncil { members: m, threshold: 1 },
+    );
+    pause_id
+}
+
 fn setup<'a>() -> (Env, RelayRegistryContractClient<'a>, Address) {
     let env = Env::default();
     env.mock_all_auths();
@@ -22,8 +32,8 @@ fn setup<'a>() -> (Env, RelayRegistryContractClient<'a>, Address) {
         members,
         threshold: 1,
     };
-
-    client.initialize(&council, &100i128, &10u32);
+    let pause_id = make_pause(&env, &admin);
+    client.initialize(&council, &100i128, &10u32, &pause_id);
     (env, client, admin)
 }
 
@@ -154,6 +164,7 @@ fn test_update_metadata_region_too_long() {
 #[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn test_update_metadata_auth_required_clean() {
     let env = Env::default();
+    env.mock_all_auths();
     let contract_id = env.register(RelayRegistryContract, ());
     let client = RelayRegistryContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
@@ -164,24 +175,31 @@ fn test_update_metadata_auth_required_clean() {
         members,
         threshold: 1,
     };
+    let pause_id = make_pause(&env, &admin);
+    client.initialize(&council, &100i128, &10u32, &pause_id);
 
-    // Hack: to initialize and register without `mock_all_auths`,
-    // we just don't call `mock_all_auths` and let it panic on `initialize` because
-    // `require_auth` isn't called in `initialize`!
-    // Wait, `initialize` does not call `require_auth`!
-    client.initialize(&council, &100i128, &10u32);
+    // Drop mock so next calls require real auth
+    let env2 = Env::default();
+    let contract_id2 = env2.register(RelayRegistryContract, ());
+    let client2 = RelayRegistryContractClient::new(&env2, &contract_id2);
+    let admin2 = Address::generate(&env2);
+    let mut members2 = soroban_sdk::Vec::new(&env2);
+    members2.push_back(admin2.clone());
+    let council2 = AdminCouncil { members: members2, threshold: 1 };
+    let pause_id2 = {
+        env2.mock_all_auths();
+        make_pause(&env2, &admin2)
+    };
+    client2.initialize(&council2, &100i128, &10u32, &pause_id2);
 
-    let node_addr = Address::generate(&env);
-
-    // `register` calls `require_auth`, so this will panic before we even get to `update_metadata`.
-    // So we can just test `update_metadata` directly and it will panic on auth.
-    // Actually we can't because `update_metadata` also fails on `NotRegistered` before auth? No, `require_auth` is called FIRST.
+    let node_addr = Address::generate(&env2);
     let new_metadata = NodeMetadata {
-        region: String::from_str(&env, "eu-west"),
+        region: String::from_str(&env2, "eu-west"),
         capacity: 2000,
         uptime_commitment: 98,
     };
-    client.update_metadata(&node_addr, &new_metadata);
+    // No mock_all_auths on env2 after setup — require_auth panics
+    client2.update_metadata(&node_addr, &new_metadata);
 }
 
 #[test]

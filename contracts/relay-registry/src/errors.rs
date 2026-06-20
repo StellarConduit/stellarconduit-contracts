@@ -71,4 +71,7 @@ pub enum ContractError {
 
     /// Cannot reinstate a node that is not currently slashed.
     NodeNotSlashed = 16,
+
+    /// Protocol is paused; operation is blocked until unpaused.
+    ProtocolPaused = 17,
 }

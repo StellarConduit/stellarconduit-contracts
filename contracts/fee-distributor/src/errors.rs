@@ -46,4 +46,7 @@ pub enum ContractError {
 
     /// Treasury share bps is outside the allowed range (must be <= 10000).
     InvalidTreasuryShare = 12,
+
+    /// Protocol is paused; operation is blocked until unpaused.
+    ProtocolPaused = 13,
 }

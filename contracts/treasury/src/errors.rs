@@ -50,4 +50,7 @@ pub enum ContractError {
 
     /// Program name length is out of bounds.
     InvalidProgramName = 15,
+
+    /// Protocol is paused; operation is blocked until unpaused.
+    ProtocolPaused = 16,
 }
