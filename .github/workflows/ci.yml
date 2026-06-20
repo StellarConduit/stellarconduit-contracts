@@ -74,13 +74,7 @@ jobs:
       - name: Report WASM sizes
         run: |
           wasms=$(
-            {
-              for dir in target/wasm32v1-none/release target/wasm32-unknown-unknown/release; do
-                if [ -d "$dir" ]; then
-                  find "$dir" -maxdepth 1 -name '*.wasm' -type f
-                fi
-              done
-            } | sort
+            find target/wasm32-unknown-unknown/release -maxdepth 1 -name '*.wasm' -type f 2>/dev/null | sort
           )
           if [ -z "$wasms" ]; then
             echo "ERROR: No WASM binaries found after build."
@@ -99,13 +93,7 @@ jobs:
       - name: Enforce WASM size budget (100KB)
         run: |
           wasms=$(
-            {
-              for dir in target/wasm32v1-none/release target/wasm32-unknown-unknown/release; do
-                if [ -d "$dir" ]; then
-                  find "$dir" -maxdepth 1 -name '*.wasm' -type f
-                fi
-              done
-            } | sort
+            find target/wasm32-unknown-unknown/release -maxdepth 1 -name '*.wasm' -type f 2>/dev/null | sort
           )
           if [ -z "$wasms" ]; then
             echo "ERROR: No WASM binaries found for size budget check."
