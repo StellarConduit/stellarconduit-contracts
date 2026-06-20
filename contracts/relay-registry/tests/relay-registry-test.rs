@@ -1,6 +1,7 @@
 #![cfg(test)]
 
 use relay_registry::{
+    errors::ContractError,
     types::{AdminCouncil, NodeMetadata, NodeStatus},
     RelayRegistryContract, RelayRegistryContractClient,
 };
@@ -9,12 +10,13 @@ use soroban_sdk::{
     token, Address, Env, String,
 };
 
-fn setup<'a>() -> (Env, RelayRegistryContractClient<'a>, Address) {
+fn setup<'a>() -> (Env, RelayRegistryContractClient<'a>, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register(RelayRegistryContract, ());
     let client = RelayRegistryContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
+    let treasury = Address::generate(&env);
 
     let mut members = soroban_sdk::Vec::new(&env);
     members.push_back(admin.clone());
@@ -23,13 +25,13 @@ fn setup<'a>() -> (Env, RelayRegistryContractClient<'a>, Address) {
         threshold: 1,
     };
 
-    client.initialize(&council, &100i128, &10u32);
-    (env, client, admin)
+    client.initialize(&council, &100i128, &10u32, &treasury);
+    (env, client, admin, treasury)
 }
 
 #[test]
 fn test_update_metadata_success() {
-    let (env, client, _) = setup();
+    let (env, client, _, _) = setup();
     let node_addr = Address::generate(&env);
     let initial_metadata = NodeMetadata {
         region: String::from_str(&env, "us-east"),
@@ -64,7 +66,7 @@ fn test_update_metadata_success() {
 
 #[test]
 fn test_update_metadata_preserves_status_and_stake() {
-    let (env, client, _) = setup();
+    let (env, client, _, _) = setup();
     let node_addr = Address::generate(&env);
     let metadata = NodeMetadata {
         region: String::from_str(&env, "us-east"),
@@ -92,7 +94,7 @@ fn test_update_metadata_preserves_status_and_stake() {
 #[test]
 #[should_panic(expected = "Error(Contract, #2)")] // NotRegistered
 fn test_update_metadata_not_registered() {
-    let (env, client, _) = setup();
+    let (env, client, _, _) = setup();
     let node_addr = Address::generate(&env);
     let new_metadata = NodeMetadata {
         region: String::from_str(&env, "eu-west"),
@@ -106,7 +108,7 @@ fn test_update_metadata_not_registered() {
 #[test]
 #[should_panic(expected = "Error(Contract, #8)")] // InvalidMetadata
 fn test_update_metadata_invalid_commitment() {
-    let (env, client, _) = setup();
+    let (env, client, _, _) = setup();
     let node_addr = Address::generate(&env);
     let metadata = NodeMetadata {
         region: String::from_str(&env, "us-east"),
@@ -128,7 +130,7 @@ fn test_update_metadata_invalid_commitment() {
 #[test]
 #[should_panic(expected = "Error(Contract, #8)")] // InvalidMetadata
 fn test_update_metadata_region_too_long() {
-    let (env, client, _) = setup();
+    let (env, client, _, _) = setup();
     let node_addr = Address::generate(&env);
     let metadata = NodeMetadata {
         region: String::from_str(&env, "us-east"),
@@ -169,7 +171,7 @@ fn test_update_metadata_auth_required_clean() {
     // we just don't call `mock_all_auths` and let it panic on `initialize` because
     // `require_auth` isn't called in `initialize`!
     // Wait, `initialize` does not call `require_auth`!
-    client.initialize(&council, &100i128, &10u32);
+    client.initialize(&council, &100i128, &10u32, &Address::generate(&env));
 
     let node_addr = Address::generate(&env);
 
@@ -186,7 +188,7 @@ fn test_update_metadata_auth_required_clean() {
 
 #[test]
 fn test_unstake_creates_lock_entry() {
-    let (env, client, _admin) = setup();
+    let (env, client, _admin, _) = setup();
 
     // We must deploy a deterministic token contract and initialize it for stakes
     let token_admin = Address::generate(&env);
@@ -234,7 +236,7 @@ fn test_unstake_creates_lock_entry() {
 
 #[test]
 fn test_finalize_unstake_success_after_lock() {
-    let (env, client, _admin) = setup();
+    let (env, client, _admin, _) = setup();
 
     let token_admin = Address::generate(&env);
     let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
@@ -279,7 +281,7 @@ fn test_finalize_unstake_success_after_lock() {
 #[test]
 #[should_panic(expected = "Error(Contract, #14)")] // NoPendingUnstake
 fn test_finalize_unstake_no_entry() {
-    let (env, client, _) = setup();
+    let (env, client, _, _) = setup();
     let node_addr = Address::generate(&env);
 
     client.finalize_unstake(&node_addr);
@@ -287,7 +289,7 @@ fn test_finalize_unstake_no_entry() {
 
 #[test]
 fn test_reinstate_node_from_slashed_to_inactive_and_restake() {
-    let (env, client, _admin) = setup();
+    let (env, client, _admin, _) = setup();
 
     // Configure a token contract and set it as the staking token.
     let token_admin = Address::generate(&env);
@@ -341,7 +343,7 @@ fn test_reinstate_node_from_slashed_to_inactive_and_restake() {
 #[test]
 #[should_panic(expected = "Error(Contract, #16)")] // NodeNotSlashed
 fn test_reinstate_node_when_inactive_fails() {
-    let (env, client, _admin) = setup();
+    let (env, client, _admin, _) = setup();
     let node_addr = Address::generate(&env);
     let metadata = NodeMetadata {
         region: String::from_str(&env, "us-east"),
@@ -358,7 +360,7 @@ fn test_reinstate_node_when_inactive_fails() {
 #[test]
 #[should_panic(expected = "Error(Contract, #16)")] // NodeNotSlashed
 fn test_reinstate_node_when_active_fails() {
-    let (env, client, _admin) = setup();
+    let (env, client, _admin, _) = setup();
 
     // Configure token for staking.
     let token_admin = Address::generate(&env);
@@ -389,7 +391,7 @@ fn test_reinstate_node_when_active_fails() {
 #[test]
 #[should_panic(expected = "Error(Contract, #2)")] // NotRegistered
 fn test_reinstate_node_not_registered_fails() {
-    let (env, client, _admin) = setup();
+    let (env, client, _admin, _) = setup();
     let node_addr = Address::generate(&env);
 
     // Node was never registered; should fail with NotRegistered.
@@ -398,7 +400,7 @@ fn test_reinstate_node_not_registered_fails() {
 
 #[test]
 fn test_slash_seizes_pending_unstake() {
-    let (env, client, _admin) = setup();
+    let (env, client, _admin, _) = setup();
 
     // Configure a token contract and set it as the staking token.
     let token_admin = Address::generate(&env);
@@ -474,4 +476,103 @@ fn test_slash_seizes_pending_unstake() {
     // Attempting to finalize unstake should fail
     let res = client.try_finalize_unstake(&node_addr);
     assert!(res.is_err());
+}
+
+#[test]
+fn test_slash_transfers_stake_to_treasury() {
+    let (env, client, _admin, treasury) = setup();
+
+    let token_admin = Address::generate(&env);
+    let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token_contract.address());
+    let token_address = token_client.address.clone();
+    let token_standard = token::Client::new(&env, &token_address);
+
+    env.as_contract(&client.address, || {
+        relay_registry::storage::set_token_address(&env, &token_address);
+    });
+
+    let node_addr = Address::generate(&env);
+    let metadata = NodeMetadata {
+        region: String::from_str(&env, "us-east"),
+        capacity: 1000,
+        uptime_commitment: 99,
+    };
+
+    token_client.mint(&node_addr, &1000);
+    client.register(&node_addr, &metadata);
+    client.stake(&node_addr, &1000);
+
+    assert_eq!(token_standard.balance(&treasury), 0);
+
+    client.slash(&node_addr, &String::from_str(&env, "misbehavior"));
+
+    assert_eq!(token_standard.balance(&treasury), 1000);
+}
+
+#[test]
+fn test_slash_with_pending_unstake_transfers_combined_amount() {
+    let (env, client, _admin, treasury) = setup();
+
+    let token_admin = Address::generate(&env);
+    let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token_contract.address());
+    let token_address = token_client.address.clone();
+    let token_standard = token::Client::new(&env, &token_address);
+
+    env.as_contract(&client.address, || {
+        relay_registry::storage::set_token_address(&env, &token_address);
+    });
+
+    let node_addr = Address::generate(&env);
+    let metadata = NodeMetadata {
+        region: String::from_str(&env, "us-east"),
+        capacity: 1000,
+        uptime_commitment: 99,
+    };
+
+    token_client.mint(&node_addr, &1000);
+    client.register(&node_addr, &metadata);
+    client.stake(&node_addr, &1000);
+    client.unstake(&node_addr, &400);
+
+    assert_eq!(client.get_node(&node_addr).stake, 600);
+
+    client.slash(&node_addr, &String::from_str(&env, "misbehavior"));
+
+    assert_eq!(token_standard.balance(&treasury), 1000);
+}
+
+#[test]
+fn test_slash_without_treasury_address_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(RelayRegistryContract, ());
+    let client = RelayRegistryContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let mut members = soroban_sdk::Vec::new(&env);
+    members.push_back(admin.clone());
+    let council = AdminCouncil {
+        members,
+        threshold: 1,
+    };
+
+    let node_addr = Address::generate(&env);
+    let metadata = NodeMetadata {
+        region: String::from_str(&env, "us-east"),
+        capacity: 1000,
+        uptime_commitment: 99,
+    };
+
+    // Partial setup: council configured but treasury address never stored.
+    env.as_contract(&client.address, || {
+        relay_registry::storage::set_admin_council(&env, &council);
+    });
+
+    client.register(&node_addr, &metadata);
+
+    let result = client.try_slash(&node_addr, &String::from_str(&env, "misbehavior"));
+    assert_eq!(result, Err(Ok(ContractError::NotInitialized)));
 }

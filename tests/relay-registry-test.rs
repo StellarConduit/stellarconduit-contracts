@@ -40,7 +40,8 @@ mod tests {
         };
         
         // Initialize with test parameters
-        client.initialize(&council, &100i128, &10u32);
+        let treasury = Address::generate(&env);
+        client.initialize(&council, &100i128, &10u32, &treasury);
         
         (env, client, admin)
     }
@@ -80,7 +81,7 @@ mod tests {
         };
         
         // Test successful initialization
-        let result = client.try_initialize(&council, &100i128, &10u32);
+        let result = client.try_initialize(&council, &100i128, &10u32, &Address::generate(&env));
         assert_eq!(result, Ok(()));
         
         // Verify initialization was successful by trying to register a node
@@ -107,7 +108,7 @@ mod tests {
         };
         
         // Test that second initialization fails
-        let result = client.try_initialize(&council, &200i128, &20u32);
+        let result = client.try_initialize(&council, &200i128, &20u32, &Address::generate(&env));
         assert_eq!(result, Err(ContractError::AlreadyInitialized));
     }
 
@@ -128,7 +129,7 @@ mod tests {
         };
         
         // Test that zero min_stake fails
-        let result = client.try_initialize(&council, &0i128, &10u32);
+        let result = client.try_initialize(&council, &0i128, &10u32, &Address::generate(&env));
         assert_eq!(result, Err(ContractError::InvalidAmount));
     }
 
@@ -149,7 +150,7 @@ mod tests {
         };
         
         // Test that zero lock period fails
-        let result = client.try_initialize(&council, &100i128, &0u32);
+        let result = client.try_initialize(&council, &100i128, &0u32, &Address::generate(&env));
         assert_eq!(result, Err(ContractError::InvalidAmount));
     }
 
@@ -170,7 +171,7 @@ mod tests {
         };
         
         // Test that invalid council config fails
-        let result = client.try_initialize(&council, &100i128, &10u32);
+        let result = client.try_initialize(&council, &100i128, &10u32, &Address::generate(&env));
         assert_eq!(result, Err(ContractError::InvalidCouncilConfig));
     }
 
