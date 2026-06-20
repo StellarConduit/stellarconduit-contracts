@@ -22,7 +22,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32v1-none,wasm32-unknown-unknown
+          targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
       # Step 3: Cache Rust dependencies
@@ -31,7 +31,7 @@ jobs:
 
       # Step 4: Install Stellar CLI
       - name: Install Stellar CLI
-        uses: stellar/stellar-cli@v23.0.1
+        run: cargo install --locked stellar-cli --version 22.0.0 --features opt
 
       # Step 5: Check formatting
       - name: Check Formatting
@@ -60,13 +60,13 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32v1-none,wasm32-unknown-unknown
+          targets: wasm32-unknown-unknown
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
       - name: Install Stellar CLI
-        uses: stellar/stellar-cli@v23.0.1
+        run: cargo install --locked stellar-cli --version 22.0.0 --features opt
 
       - name: Build contracts
         run: stellar contract build
