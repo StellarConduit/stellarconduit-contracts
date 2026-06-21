@@ -39,8 +39,11 @@ mod tests {
             threshold: 1,
         };
         
+        let token_address = Address::generate(&env);
+        let treasury_address = Address::generate(&env);
+        
         // Initialize with test parameters
-        client.initialize(&council, &100i128, &10u32);
+        client.initialize(&council, &token_address, &treasury_address, &100i128, &10u32);
         
         (env, client, admin)
     }
@@ -79,8 +82,11 @@ mod tests {
             threshold: 1,
         };
         
+        let token_address = Address::generate(&env);
+        let treasury_address = Address::generate(&env);
+        
         // Test successful initialization
-        let result = client.try_initialize(&council, &100i128, &10u32);
+        let result = client.try_initialize(&council, &token_address, &treasury_address, &100i128, &10u32);
         assert_eq!(result, Ok(()));
         
         // Verify initialization was successful by trying to register a node
@@ -106,8 +112,11 @@ mod tests {
             threshold: 1,
         };
         
+        let token_address = Address::generate(&env);
+        let treasury_address = Address::generate(&env);
+        
         // Test that second initialization fails
-        let result = client.try_initialize(&council, &200i128, &20u32);
+        let result = client.try_initialize(&council, &token_address, &treasury_address, &200i128, &20u32);
         assert_eq!(result, Err(ContractError::AlreadyInitialized));
     }
 
@@ -127,8 +136,11 @@ mod tests {
             threshold: 1,
         };
         
+        let token_address = Address::generate(&env);
+        let treasury_address = Address::generate(&env);
+        
         // Test that zero min_stake fails
-        let result = client.try_initialize(&council, &0i128, &10u32);
+        let result = client.try_initialize(&council, &token_address, &treasury_address, &0i128, &10u32);
         assert_eq!(result, Err(ContractError::InvalidAmount));
     }
 
@@ -148,8 +160,11 @@ mod tests {
             threshold: 1,
         };
         
+        let token_address = Address::generate(&env);
+        let treasury_address = Address::generate(&env);
+        
         // Test that zero lock period fails
-        let result = client.try_initialize(&council, &100i128, &0u32);
+        let result = client.try_initialize(&council, &token_address, &treasury_address, &100i128, &0u32);
         assert_eq!(result, Err(ContractError::InvalidAmount));
     }
 
@@ -169,8 +184,11 @@ mod tests {
             threshold: 2, // Threshold > members count
         };
         
+        let token_address = Address::generate(&env);
+        let treasury_address = Address::generate(&env);
+        
         // Test that invalid council config fails
-        let result = client.try_initialize(&council, &100i128, &10u32);
+        let result = client.try_initialize(&council, &token_address, &treasury_address, &100i128, &10u32);
         assert_eq!(result, Err(ContractError::InvalidCouncilConfig));
     }
 
