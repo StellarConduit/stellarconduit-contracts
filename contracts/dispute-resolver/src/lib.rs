@@ -70,6 +70,10 @@ impl DisputeResolverContract {
         storage::extend_instance_ttl(&env);
         initiator.require_auth();
 
+        if initiator == respondent {
+            return Err(ContractError::InvalidRespondent);
+        }
+
         // Guard against duplicate disputes for the same tx_id.
         if storage::get_dispute_by_tx(&env, &tx_id).is_some() {
             return Err(ContractError::DuplicateDispute);
@@ -91,6 +95,7 @@ impl DisputeResolverContract {
             tx_id: tx_id.clone(),
             initiator: initiator.clone(),
             respondent: Some(respondent.clone()),
+            respondent: respondent.clone(),
             initiator_proof: proof,
             respondent_proof: OptionalRelayChainProof::None,
             status: DisputeStatus::Open,
@@ -147,6 +152,10 @@ impl DisputeResolverContract {
         // Validate that the respondent is still active in the relay registry.
         Self::require_active_node(&env, &respondent)?;
 
+        if dispute.respondent != respondent {
+            return Err(ContractError::UnauthorizedRespondent);
+        }
+
         // Only Open disputes can receive a response.
         if dispute.status != DisputeStatus::Open {
             return Err(ContractError::NotOpen);
@@ -157,7 +166,6 @@ impl DisputeResolverContract {
             return Err(ContractError::ResolutionWindowExpired);
         }
 
-        dispute.respondent = Some(respondent.clone());
         dispute.respondent_proof = OptionalRelayChainProof::Some(proof);
         dispute.status = DisputeStatus::Responded;
 
@@ -212,7 +220,7 @@ impl DisputeResolverContract {
             let ruling = Ruling {
                 dispute_id,
                 winner: dispute.initiator.clone(),
-                loser: dispute.initiator.clone(), // no respondent; loser is a placeholder
+                loser: dispute.respondent.clone(),
                 reason: String::from_str(
                     &env,
                     "Respondent failed to respond within the resolution window",
@@ -237,10 +245,7 @@ impl DisputeResolverContract {
             return Err(ContractError::NotResponded);
         }
 
-        let respondent = dispute
-            .respondent
-            .clone()
-            .ok_or(ContractError::NotResponded)?;
+        let respondent = dispute.respondent.clone();
 
         let respondent_proof = match &dispute.respondent_proof {
             OptionalRelayChainProof::Some(p) => p.clone(),

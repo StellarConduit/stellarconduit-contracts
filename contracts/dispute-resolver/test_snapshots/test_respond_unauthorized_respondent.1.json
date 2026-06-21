@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 4,
+    "address": 5,
     "nonce": 0
   },
   "auth": [
@@ -60,57 +60,6 @@
         }
       ]
     ],
-    [
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "respond",
-              "args": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                },
-                {
-                  "u64": 1
-                },
-                {
-                  "map": [
-                    {
-                      "key": {
-                        "symbol": "chain_hash"
-                      },
-                      "val": {
-                        "bytes": "0808080808080808080808080808080808080808080808080808080808080808"
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "sequence"
-                      },
-                      "val": {
-                        "u64": 15
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "signature"
-                      },
-                      "val": {
-                        "bytes": "146db5d62511028f1cea89988ff1ca858c76e744af5c00d98c3e9737ef7cc6dfee85111954e26018adf0efb82d4493b6a75bc3d140e3b6b4cc5bf73dabaa8802"
-                      }
-                    }
-                  ]
-                }
-              ]
-            }
-          },
-          "sub_invocations": []
-        }
-      ]
-    ],
-    [],
     []
   ],
   "ledger": {
@@ -240,35 +189,7 @@
                       "val": {
                         "vec": [
                           {
-                            "symbol": "Some"
-                          },
-                          {
-                            "map": [
-                              {
-                                "key": {
-                                  "symbol": "chain_hash"
-                                },
-                                "val": {
-                                  "bytes": "0808080808080808080808080808080808080808080808080808080808080808"
-                                }
-                              },
-                              {
-                                "key": {
-                                  "symbol": "sequence"
-                                },
-                                "val": {
-                                  "u64": 15
-                                }
-                              },
-                              {
-                                "key": {
-                                  "symbol": "signature"
-                                },
-                                "val": {
-                                  "bytes": "146db5d62511028f1cea89988ff1ca858c76e744af5c00d98c3e9737ef7cc6dfee85111954e26018adf0efb82d4493b6a75bc3d140e3b6b4cc5bf73dabaa8802"
-                                }
-                              }
-                            ]
+                            "symbol": "None"
                           }
                         ]
                       }
@@ -280,7 +201,7 @@
                       "val": {
                         "vec": [
                           {
-                            "symbol": "Resolved"
+                            "symbol": "Open"
                           }
                         ]
                       }
@@ -384,92 +305,6 @@
                 "durability": "persistent",
                 "val": {
                   "bytes": "8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394"
-                }
-              }
-            },
-            "ext": "v0"
-          },
-          518400
-        ]
-      ],
-      [
-        {
-          "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-            "key": {
-              "vec": [
-                {
-                  "symbol": "Ruling"
-                },
-                {
-                  "u64": 1
-                }
-              ]
-            },
-            "durability": "persistent"
-          }
-        },
-        [
-          {
-            "last_modified_ledger_seq": 0,
-            "data": {
-              "contract_data": {
-                "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-                "key": {
-                  "vec": [
-                    {
-                      "symbol": "Ruling"
-                    },
-                    {
-                      "u64": 1
-                    }
-                  ]
-                },
-                "durability": "persistent",
-                "val": {
-                  "map": [
-                    {
-                      "key": {
-                        "symbol": "dispute_id"
-                      },
-                      "val": {
-                        "u64": 1
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "loser"
-                      },
-                      "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "reason"
-                      },
-                      "val": {
-                        "string": "Both proofs valid; initiator has lower or equal sequence"
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "resolved_at"
-                      },
-                      "val": {
-                        "u64": 0
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "winner"
-                      },
-                      "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
-                      }
-                    }
-                  ]
                 }
               }
             },
@@ -635,39 +470,6 @@
                 "key": {
                   "ledger_key_nonce": {
                     "nonce": 801925984706572462
-                  }
-                },
-                "durability": "temporary",
-                "val": "void"
-              }
-            },
-            "ext": "v0"
-          },
-          6311999
-        ]
-      ],
-      [
-        {
-          "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-            "key": {
-              "ledger_key_nonce": {
-                "nonce": 5541220902715666415
-              }
-            },
-            "durability": "temporary"
-          }
-        },
-        [
-          {
-            "last_modified_ledger_seq": 0,
-            "data": {
-              "contract_data": {
-                "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-                "key": {
-                  "ledger_key_nonce": {
-                    "nonce": 5541220902715666415
                   }
                 },
                 "durability": "temporary",

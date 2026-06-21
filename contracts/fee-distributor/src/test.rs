@@ -939,3 +939,174 @@ fn test_claim_preserves_total_earned() {
     assert_eq!(earnings_after.unclaimed, 0);
     assert_eq!(earnings_after.total_claimed, total_earned_before);
 }
+
+// ============================================================================
+// initialize() — treasury_share_bps validation Tests
+// ============================================================================
+
+#[test]
+fn test_initialize_invalid_treasury_share_above_max() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(FeeDistributorContract, ());
+    let client = FeeDistributorContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let mut members = soroban_sdk::Vec::new(&env);
+    members.push_back(admin.clone());
+    let council = crate::types::AdminCouncil {
+        members,
+        threshold: 1,
+    };
+    let treasury = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    // treasury_share_bps = 10001 should fail
+    let result = client.try_initialize(&council, &50u32, &10001u32, &treasury, &token);
+    assert_eq!(result, Err(Ok(ContractError::InvalidTreasuryShare)));
+}
+
+// ============================================================================
+// set_treasury_share() Tests
+// ============================================================================
+
+#[test]
+fn test_set_treasury_share_success() {
+    let (env, client, contract_id) = setup_with_token();
+    let relay = Address::generate(&env);
+
+    // Update treasury share from 10% to 20%
+    client.set_treasury_share(&2000u32);
+
+    // Distribute and verify the new split is applied
+    client.distribute(&relay, &1u64, &10000u32);
+    // fee = 10000 * 50 / 10000 = 50
+    // treasury_share = 50 * 2000 / 10000 = 10
+    // relay_payout = 50 - 10 = 40
+    let earnings = client.get_earnings(&relay);
+    assert_eq!(earnings.total_earned, 40);
+    let _ = contract_id;
+}
+
+#[test]
+fn test_set_treasury_share_invalid_above_max() {
+    let (_env, client) = setup();
+
+    let result = client.try_set_treasury_share(&10001u32);
+    assert_eq!(result, Err(Ok(ContractError::InvalidTreasuryShare)));
+}
+
+#[test]
+fn test_set_treasury_share_boundary_zero() {
+    let (env, client, contract_id) = setup_with_token();
+    let relay = Address::generate(&env);
+
+    // Set treasury share to 0%
+    client.set_treasury_share(&0u32);
+
+    client.distribute(&relay, &1u64, &10000u32);
+    // fee = 50, treasury_share = 0, relay_payout = 50
+    let earnings = client.get_earnings(&relay);
+    assert_eq!(earnings.total_earned, 50);
+    let _ = contract_id;
+}
+
+#[test]
+fn test_set_treasury_share_boundary_max() {
+    let (env, client, contract_id) = setup_with_token();
+    let relay = Address::generate(&env);
+
+    // Set treasury share to 100%
+    client.set_treasury_share(&10000u32);
+
+    client.distribute(&relay, &1u64, &10000u32);
+    // fee = 50, treasury_share = 50, relay_payout = 0
+    let earnings = client.get_earnings(&relay);
+    assert_eq!(earnings.total_earned, 0);
+    let _ = contract_id;
+}
+
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_set_treasury_share_unauthorized() {
+    let env = Env::default();
+    // No mock_all_auths — auth will fail
+    let contract_id = env.register(FeeDistributorContract, ());
+    let client = FeeDistributorContractClient::new(&env, &contract_id);
+
+    client.set_treasury_share(&2000u32);
+}
+
+// ============================================================================
+// set_treasury_address() Tests
+// ============================================================================
+
+#[test]
+fn test_set_treasury_address_success() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let token_admin = Address::generate(&env);
+    let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_id = token_contract.address();
+
+    // Register two treasury contracts
+    let treasury_id_1 = env.register(treasury::TreasuryContract, ());
+    let treasury_id_2 = env.register(treasury::TreasuryContract, ());
+
+    let admin = Address::generate(&env);
+    let mut members = soroban_sdk::Vec::new(&env);
+    members.push_back(admin.clone());
+    let treasury_council = treasury::types::AdminCouncil {
+        members: members.clone(),
+        threshold: 1,
+    };
+
+    treasury::TreasuryContractClient::new(&env, &treasury_id_1)
+        .initialize(&treasury_council, &token_id);
+    treasury::TreasuryContractClient::new(&env, &treasury_id_2)
+        .initialize(&treasury_council, &token_id);
+
+    let contract_id = env.register(FeeDistributorContract, ());
+    let client = FeeDistributorContractClient::new(&env, &contract_id);
+
+    let council = crate::types::AdminCouncil {
+        members,
+        threshold: 1,
+    };
+
+    // Initialize pointing at treasury_id_1
+    client.initialize(&council, &100u32, &5000u32, &treasury_id_1, &token_id);
+
+    let token_client = token::StellarAssetClient::new(&env, &token_id);
+    token_client.mint(&contract_id, &1_000_000);
+
+    let relay = Address::generate(&env);
+
+    // Distribute to treasury_id_1
+    client.distribute(&relay, &1u64, &1000u32);
+    // fee = 10, treasury_share = 5, relay_payout = 5
+
+    let treasury2_client = treasury::TreasuryContractClient::new(&env, &treasury_id_2);
+
+    // Update to treasury_id_2
+    client.set_treasury_address(&treasury_id_2);
+
+    // Distribute again — should now credit treasury_id_2
+    client.distribute(&relay, &2u64, &1000u32);
+
+    // treasury_id_2 should have received 5 tokens
+    let treasury2_balance = treasury2_client.get_balance();
+    assert_eq!(treasury2_balance, 5);
+}
+
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_set_treasury_address_unauthorized() {
+    let env = Env::default();
+    // No mock_all_auths
+    let contract_id = env.register(FeeDistributorContract, ());
+    let client = FeeDistributorContractClient::new(&env, &contract_id);
+    let new_treasury = Address::generate(&env);
+
+    client.set_treasury_address(&new_treasury);
+}

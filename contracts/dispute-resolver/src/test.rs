@@ -190,3 +190,16 @@ fn test_resolve_both_invalid() {
 
 
 
+#[test]
+fn test_raise_dispute_self_rejection() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, initiator, _, init_sk, _) = setup_dispute(&env);
+
+    let tx_id = BytesN::from_array(&env, &[9u8; 32]);
+    let chain_hash = [8u8; 32];
+    let init_proof = create_proof(&env, &init_sk, &chain_hash, 10);
+
+    let result = client.try_raise_dispute(&initiator, &initiator, &tx_id, &init_proof);
+    assert_eq!(result, Err(Ok(ContractError::InvalidRespondent)));
+}
