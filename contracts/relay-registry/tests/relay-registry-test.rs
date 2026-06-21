@@ -2,7 +2,7 @@
 
 use relay_registry::{
     errors::ContractError,
-    types::{AdminCouncil, NodeMetadata, NodeStatus},
+    types::{AdminCouncil, NodeMetadata, NodeStatus, StakeEntry},
     RelayRegistryContract, RelayRegistryContractClient,
 };
 use soroban_sdk::{
@@ -10,7 +10,18 @@ use soroban_sdk::{
     token, Address, Env, String,
 };
 
-fn setup<'a>() -> (Env, RelayRegistryContractClient<'a>, Address, Address) {
+const MIN_STAKE: i128 = 100;
+const LOCK_PERIOD: u32 = 10;
+
+struct LifecycleSetup<'a> {
+    env: Env,
+    client: RelayRegistryContractClient<'a>,
+    token: token::Client<'a>,
+    token_admin: token::StellarAssetClient<'a>,
+    treasury: Address,
+}
+
+fn setup() -> (Env, RelayRegistryContractClient<'static>, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register(RelayRegistryContract, ());
@@ -25,8 +36,58 @@ fn setup<'a>() -> (Env, RelayRegistryContractClient<'a>, Address, Address) {
         threshold: 1,
     };
 
-    client.initialize(&council, &100i128, &10u32, &treasury);
+    client.initialize(&council, &MIN_STAKE, &LOCK_PERIOD, &treasury);
     (env, client, admin, treasury)
+}
+
+/// Deploys relay registry, SAC token, treasury, and wires token address into storage.
+fn setup_lifecycle() -> LifecycleSetup<'static> {
+    let (env, client, _admin, treasury) = setup();
+
+    let token_admin = Address::generate(&env);
+    let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_admin_client = token::StellarAssetClient::new(&env, &token_contract.address());
+    let token_address = token_admin_client.address.clone();
+    let token = token::Client::new(&env, &token_address);
+
+    env.as_contract(&client.address, || {
+        relay_registry::storage::set_token_address(&env, &token_address);
+    });
+
+    LifecycleSetup {
+        env,
+        client,
+        token,
+        token_admin: token_admin_client,
+        treasury,
+    }
+}
+
+fn sample_metadata(env: &Env) -> NodeMetadata {
+    NodeMetadata {
+        region: String::from_str(env, "AF"),
+        capacity: 1000,
+        uptime_commitment: 99,
+    }
+}
+
+fn get_lock_entry(
+    env: &Env,
+    client: &RelayRegistryContractClient,
+    node: &Address,
+) -> Option<StakeEntry> {
+    env.as_contract(&client.address, || relay_registry::storage::get_lock_entry(env, node))
+}
+
+fn get_lock_period(env: &Env, client: &RelayRegistryContractClient) -> u32 {
+    env.as_contract(&client.address, || relay_registry::storage::get_stake_lock_period(env))
+}
+
+fn advance_past_lock_period(env: &Env, client: &RelayRegistryContractClient) {
+    let lock_period = get_lock_period(env, client);
+    env.ledger().with_mut(|ledger| {
+        ledger.timestamp = ledger.timestamp.saturating_add(lock_period as u64 + 1);
+    });
 }
 
 #[test]
@@ -575,4 +636,208 @@ fn test_slash_without_treasury_address_returns_error() {
 
     let result = client.try_slash(&node_addr, &String::from_str(&env, "misbehavior"));
     assert_eq!(result, Err(Ok(ContractError::NotInitialized)));
+}
+
+// --- Staking lifecycle integration tests (issue #126) ---
+
+#[test]
+fn test_full_staking_lifecycle_happy_path() {
+    let setup = setup_lifecycle();
+    let LifecycleSetup {
+        env,
+        client,
+        token,
+        token_admin,
+        ..
+    } = setup;
+
+    let node = Address::generate(&env);
+    let metadata = sample_metadata(&env);
+
+    client.register(&node, &metadata);
+    let record = client.get_node(&node);
+    assert_eq!(record.status, NodeStatus::Inactive);
+    assert_eq!(record.stake, 0);
+
+    token_admin.mint(&node, &1_000);
+    client.stake(&node, &1_000);
+    let record = client.get_node(&node);
+    assert_eq!(record.status, NodeStatus::Active);
+    assert_eq!(record.stake, 1_000);
+    assert_eq!(token.balance(&node), 0);
+
+    client.unstake(&node, &1_000);
+    let record = client.get_node(&node);
+    assert_eq!(record.status, NodeStatus::Inactive);
+    assert_eq!(record.stake, 0);
+
+    let lock = get_lock_entry(&env, &client, &node);
+    assert!(lock.is_some());
+    assert_eq!(lock.unwrap().amount, 1_000);
+
+    advance_past_lock_period(&env, &client);
+
+    let balance_before = token.balance(&node);
+    client.finalize_unstake(&node);
+    let balance_after = token.balance(&node);
+    assert_eq!(balance_after - balance_before, 1_000);
+
+    assert!(get_lock_entry(&env, &client, &node).is_none());
+    let record = client.get_node(&node);
+    assert_eq!(record.stake, 0);
+}
+
+#[test]
+fn test_slash_active_node_with_no_pending_unstake() {
+    let setup = setup_lifecycle();
+    let LifecycleSetup {
+        env,
+        client,
+        token,
+        token_admin,
+        treasury,
+    } = setup;
+
+    let node = Address::generate(&env);
+    client.register(&node, &sample_metadata(&env));
+
+    token_admin.mint(&node, &500);
+    client.stake(&node, &500);
+
+    let treasury_balance_before = token.balance(&treasury);
+    client.slash(&node, &String::from_str(&env, "misbehavior"));
+
+    let record = client.get_node(&node);
+    assert_eq!(record.status, NodeStatus::Slashed);
+    assert_eq!(record.stake, 0);
+
+    let treasury_balance_after = token.balance(&treasury);
+    assert_eq!(treasury_balance_after - treasury_balance_before, 500);
+
+    assert!(get_lock_entry(&env, &client, &node).is_none());
+}
+
+#[test]
+fn test_slash_seizes_combined_active_and_pending_stake() {
+    let setup = setup_lifecycle();
+    let LifecycleSetup {
+        env,
+        client,
+        token,
+        token_admin,
+        treasury,
+    } = setup;
+
+    let node = Address::generate(&env);
+    client.register(&node, &sample_metadata(&env));
+
+    token_admin.mint(&node, &1_000);
+    client.stake(&node, &1_000);
+    client.unstake(&node, &400);
+
+    let record = client.get_node(&node);
+    assert_eq!(record.stake, 600);
+    let lock = get_lock_entry(&env, &client, &node);
+    assert!(lock.is_some());
+    assert_eq!(lock.unwrap().amount, 400);
+
+    let treasury_balance_before = token.balance(&treasury);
+    client.slash(&node, &String::from_str(&env, "fraud"));
+
+    let treasury_balance_after = token.balance(&treasury);
+    assert_eq!(treasury_balance_after - treasury_balance_before, 1_000);
+
+    assert!(get_lock_entry(&env, &client, &node).is_none());
+
+    let result = client.try_finalize_unstake(&node);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_restake_after_unstake_does_not_overwrite_lock_entry() {
+    let setup = setup_lifecycle();
+    let LifecycleSetup {
+        env,
+        client,
+        token_admin,
+        ..
+    } = setup;
+
+    let node = Address::generate(&env);
+    client.register(&node, &sample_metadata(&env));
+
+    token_admin.mint(&node, &1_000);
+    client.stake(&node, &1_000);
+    client.unstake(&node, &500);
+
+    let record = client.get_node(&node);
+    assert_eq!(record.stake, 500);
+    let lock = get_lock_entry(&env, &client, &node);
+    assert!(lock.is_some());
+    assert_eq!(lock.unwrap().amount, 500);
+
+    token_admin.mint(&node, &200);
+    client.stake(&node, &200);
+
+    let record = client.get_node(&node);
+    assert_eq!(record.stake, 700);
+
+    let lock = get_lock_entry(&env, &client, &node);
+    assert!(lock.is_some());
+    assert_eq!(lock.unwrap().amount, 500);
+}
+
+#[test]
+fn test_reinstated_node_must_restake_to_become_active() {
+    let setup = setup_lifecycle();
+    let LifecycleSetup {
+        env,
+        client,
+        token_admin,
+        ..
+    } = setup;
+
+    let node = Address::generate(&env);
+    client.register(&node, &sample_metadata(&env));
+
+    token_admin.mint(&node, &1_000);
+    client.stake(&node, &1_000);
+
+    client.slash(&node, &String::from_str(&env, "test"));
+
+    let record = client.get_node(&node);
+    assert_eq!(record.status, NodeStatus::Slashed);
+
+    client.reinstate_node(&node);
+
+    let record = client.get_node(&node);
+    assert_eq!(record.status, NodeStatus::Inactive);
+    assert_eq!(record.stake, 0, "reinstated node should not regain slashed stake");
+
+    token_admin.mint(&node, &1_000);
+    client.stake(&node, &1_000);
+
+    let record = client.get_node(&node);
+    assert_eq!(record.status, NodeStatus::Active);
+}
+
+#[test]
+fn test_finalize_unstake_before_lock_period_fails() {
+    let setup = setup_lifecycle();
+    let LifecycleSetup {
+        env,
+        client,
+        token_admin,
+        ..
+    } = setup;
+
+    let node = Address::generate(&env);
+    client.register(&node, &sample_metadata(&env));
+
+    token_admin.mint(&node, &1_000);
+    client.stake(&node, &1_000);
+    client.unstake(&node, &1_000);
+
+    let result = client.try_finalize_unstake(&node);
+    assert!(result.is_err(), "should not be able to finalize before lock expires");
 }
