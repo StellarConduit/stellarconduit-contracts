@@ -44,6 +44,7 @@ fn create_spending_program(
     client: &TreasuryContractClient,
     program_id: u64,
     budget: i128,
+    recipient_address: Address,
 ) {
     let program = SpendingProgram {
         program_id,
@@ -51,6 +52,7 @@ fn create_spending_program(
         spent: 0,
         active: true,
         name: String::from_str(env, "Test Program"),
+        recipient_address, // 👈 FIX: Core assignment updated
     };
 
     env.as_contract(&client.address, || {
@@ -248,21 +250,27 @@ fn test_withdraw_unauthorized() {
 
 #[test]
 fn test_allocate_success() {
-    let (env, client, _admin, _token_id, token_client) = setup();
+    let (env, client, _admin, token_id, token_client) = setup();
     let user = Address::generate(&env);
+    let recipient = Address::generate(&env);
 
     // Deposit 10,000
     token_client.mint(&user, &10_000);
     client.deposit(&user, &10_000);
 
-    // Create spending program 1 with budget 5000
-    create_spending_program(&env, &client, 1, 5_000);
+    // Create spending program 1 with budget 5000 and target recipient address
+    create_spending_program(&env, &client, 1, 5_000, recipient.clone());
 
     // Allocate 2000
     client.allocate(&1, &2_000);
 
     assert_eq!(client.get_balance(), 8_000);
-    // In actual contract, allocate() increments spent
+
+    // Verify physical on-chain SAC token distribution occurred cleanly
+    let token = token::Client::new(&env, &token_id);
+    assert_eq!(token.balance(&recipient), 2_000);
+    assert_eq!(token.balance(&client.address), 8_000);
+
     let program = env.as_contract(&client.address, || {
         treasury::storage::get_spending_program(&env, 1).unwrap()
     });
@@ -287,17 +295,19 @@ fn test_allocate_program_not_found() {
 fn test_allocate_program_inactive() {
     let (env, client, _admin, _token_id, token_client) = setup();
     let user = Address::generate(&env);
+    let recipient = Address::generate(&env);
 
     token_client.mint(&user, &10_000);
     client.deposit(&user, &10_000);
 
-    // Create inactive program
+    // Create inactive program with missing fields satisfied
     let program = treasury::types::SpendingProgram {
         program_id: 1,
         budget: 5_000,
         spent: 0,
         active: false,
         name: String::from_str(&env, "Inactive"),
+        recipient_address: recipient,
     };
     env.as_contract(&client.address, || {
         treasury::storage::set_spending_program(&env, 1, program);
@@ -311,12 +321,13 @@ fn test_allocate_program_inactive() {
 fn test_allocate_over_budget() {
     let (env, client, _admin, _token_id, token_client) = setup();
     let user = Address::generate(&env);
+    let recipient = Address::generate(&env);
 
     token_client.mint(&user, &10_000);
     client.deposit(&user, &10_000);
 
     // Create program with budget 5_000
-    create_spending_program(&env, &client, 1, 5_000);
+    create_spending_program(&env, &client, 1, 5_000, recipient);
 
     // Try to allocate 6_000
     client.allocate(&1, &6_000);
@@ -327,13 +338,14 @@ fn test_allocate_over_budget() {
 fn test_allocate_insufficient_treasury_balance() {
     let (env, client, _admin, _token_id, token_client) = setup();
     let user = Address::generate(&env);
+    let recipient = Address::generate(&env);
 
     // Deposit only 2,000
     token_client.mint(&user, &2_000);
     client.deposit(&user, &2_000);
 
     // Create program with budget 5_000
-    create_spending_program(&env, &client, 1, 5_000);
+    create_spending_program(&env, &client, 1, 5_000, recipient);
 
     // Try to allocate 3_000 (below budget, but exceeds treasury balance)
     client.allocate(&1, &3_000);
