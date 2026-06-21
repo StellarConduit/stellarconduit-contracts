@@ -25,7 +25,13 @@ fn setup<'a>() -> (Env, RelayRegistryContractClient<'a>, Address) {
 
     let token_address = Address::generate(&env);
     let treasury_address = Address::generate(&env);
-    client.initialize(&council, &token_address, &treasury_address, &100i128, &10u32);
+    client.initialize(
+        &council,
+        &token_address,
+        &treasury_address,
+        &100i128,
+        &10u32,
+    );
     (env, client, admin)
 }
 
@@ -169,7 +175,13 @@ fn test_update_metadata_auth_required_clean() {
 
     let token_address = Address::generate(&env);
     let treasury_address = Address::generate(&env);
-    client.initialize(&council, &token_address, &treasury_address, &100i128, &10u32);
+    client.initialize(
+        &council,
+        &token_address,
+        &treasury_address,
+        &100i128,
+        &10u32,
+    );
 
     let node_addr = Address::generate(&env);
 
