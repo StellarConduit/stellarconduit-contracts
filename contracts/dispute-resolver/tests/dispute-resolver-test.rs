@@ -140,8 +140,6 @@ fn test_initialize_already_initialized() {
 fn test_raise_dispute_success() {
     let (env, client, _, registry) = setup();
     let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client, &registry);
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -160,8 +158,6 @@ fn test_raise_dispute_success() {
 fn test_raise_dispute_auto_increment_id() {
     let (env, client, _, registry) = setup();
     let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client, &registry);
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client);
 
     let tx_id1 = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -182,8 +178,6 @@ fn test_raise_dispute_auto_increment_id() {
 fn test_raise_dispute_duplicate_tx_id() {
     let (env, client, _, registry) = setup();
     let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client, &registry);
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -214,7 +208,6 @@ fn test_raise_dispute_auth_required() {
     client.initialize(&council, &registry_id, &100u32);
 
     let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client, &registry_id);
-    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -398,8 +391,6 @@ fn test_resolve_tie_initiator_wins() {
 fn test_resolve_no_response_expired() {
     let (env, client, _, registry) = setup();
     let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client, &registry);
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -460,8 +451,6 @@ fn test_resolve_already_resolved() {
 fn test_resolve_window_still_active() {
     let (env, client, _, registry) = setup();
     let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client, &registry);
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -479,8 +468,6 @@ fn test_resolve_window_still_active() {
 fn test_get_dispute_found() {
     let (env, client, _, registry) = setup();
     let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client, &registry);
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -504,8 +491,6 @@ fn test_get_dispute_not_found() {
 fn test_get_ruling_after_resolve() {
     let (env, client, _, registry) = setup();
     let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client, &registry);
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -527,8 +512,6 @@ fn test_get_ruling_after_resolve() {
 fn test_get_ruling_not_yet_resolved() {
     let (env, client, _, registry) = setup();
     let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client, &registry);
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -539,7 +522,3 @@ fn test_get_ruling_not_yet_resolved() {
     // Attempt to get ruling before resolution
     client.get_ruling(&dispute_id);
 }
-
-
-
-
