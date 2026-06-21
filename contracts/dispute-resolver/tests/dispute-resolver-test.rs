@@ -21,7 +21,10 @@ impl MockRelayRegistryContract {
     }
 
     pub fn is_active(env: Env, address: Address) -> bool {
-        env.storage().persistent().get::<_, bool>(&address).unwrap_or(false)
+        env.storage()
+            .persistent()
+            .get::<_, bool>(&address)
+            .unwrap_or(false)
     }
 }
 
@@ -536,7 +539,6 @@ fn test_get_ruling_not_yet_resolved() {
     // Attempt to get ruling before resolution
     client.get_ruling(&dispute_id);
 }
-
 
 
 

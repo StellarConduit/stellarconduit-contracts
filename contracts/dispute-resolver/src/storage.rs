@@ -139,7 +139,9 @@ pub fn get_registry_address(env: &Env) -> Address {
 
 /// Set the registry contract address.
 pub fn set_registry_address(env: &Env, address: &Address) {
-    env.storage().instance().set(&DataKey::RegistryAddress, address);
+    env.storage()
+        .instance()
+        .set(&DataKey::RegistryAddress, address);
 }
 
 /// Get the admin council.

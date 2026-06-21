@@ -12,7 +12,10 @@ impl MockRelayRegistryContract {
     }
 
     pub fn is_active(env: Env, address: Address) -> bool {
-        env.storage().persistent().get::<_, bool>(&address).unwrap_or(false)
+        env.storage()
+            .persistent()
+            .get::<_, bool>(&address)
+            .unwrap_or(false)
     }
 }
 
@@ -187,8 +190,6 @@ fn test_resolve_both_invalid() {
     let result = client.try_resolve(&dispute_id);
     assert!(result.is_err());
 }
-
-
 
 #[test]
 fn test_raise_dispute_self_rejection() {
