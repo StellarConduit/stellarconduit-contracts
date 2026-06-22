@@ -224,7 +224,10 @@ fn setup_allocate_context<'a>(env: &Env, client: &TreasuryContractClient<'a>, ad
     env.as_contract(&client.address, || {
         let mut members = soroban_sdk::Vec::new(env);
         members.push_back(admin.clone());
-        let council = crate::types::AdminCouncil { members, threshold: 1 };
+        let council = crate::types::AdminCouncil {
+            members,
+            threshold: 1,
+        };
         storage::set_admin_council(env, &council);
         storage::set_token_address(env, token_address);
         storage::set_pause_contract_address(env, &pause_id);
