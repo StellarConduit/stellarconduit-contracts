@@ -452,8 +452,8 @@ impl RelayRegistryContract {
             storage::remove_lock_entry(&env, &node_address);
         }
 
-        let treasury_address = storage::get_treasury_address(&env)
-            .ok_or(ContractError::NotInitialized)?;
+        let treasury_address =
+            storage::get_treasury_address(&env).ok_or(ContractError::NotInitialized)?;
 
         storage::set_node(&env, &node_address, &node);
 
