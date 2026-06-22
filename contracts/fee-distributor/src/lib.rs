@@ -118,6 +118,10 @@ impl FeeDistributorContract {
             return Err(ContractError::InvalidFeeRate);
         }
 
+        if treasury_share_bps > 10_000 {
+            return Err(ContractError::InvalidTreasuryShare);
+        }
+
         if council.threshold == 0 || council.members.len() < council.threshold {
             return Err(ContractError::InvalidCouncilConfig);
         }
@@ -320,7 +324,11 @@ impl FeeDistributorContract {
             (relay_address.clone(), payout),
         );
 
-        // TODO: SAC transfer payout to relay_address
+        let token_addr = storage::get_token_address(&env);
+        let token_client = token::Client::new(&env, &token_addr);
+
+        token_client.transfer(&env.current_contract_address(), &relay_address, &payout);
+
         Ok(payout)
     }
 
@@ -372,6 +380,66 @@ impl FeeDistributorContract {
                 soroban_sdk::Symbol::new(&env, "set_fee_rate"),
             ),
             (new_fee_rate_bps,),
+        );
+
+        Ok(())
+    }
+
+    /// Update the treasury share percentage (in basis points).
+    ///
+    /// # Parameters
+    /// - `env`: Soroban environment.
+    /// - `new_share_bps`: The new treasury share in basis points (0 to 10000).
+    ///
+    /// # Errors
+    /// - Auth error if caller is not the admin council.
+    /// - `ContractError::InvalidTreasuryShare` if the rate is > 10000.
+    pub fn set_treasury_share(env: Env, new_share_bps: u32) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
+        let mut config = storage::get_fee_config(&env);
+
+        require_council_auth(&env, &config.council);
+
+        if new_share_bps > 10_000 {
+            return Err(ContractError::InvalidTreasuryShare);
+        }
+
+        config.treasury_share_bps = new_share_bps;
+        storage::set_fee_config(&env, &config);
+
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "fee_distributor"),
+                soroban_sdk::Symbol::new(&env, "set_treasury_share"),
+            ),
+            (new_share_bps,),
+        );
+
+        Ok(())
+    }
+
+    /// Update the treasury contract address.
+    ///
+    /// # Parameters
+    /// - `env`: Soroban environment.
+    /// - `new_treasury`: The new treasury contract address.
+    ///
+    /// # Errors
+    /// - Auth error if caller is not the admin council.
+    pub fn set_treasury_address(env: Env, new_treasury: Address) -> Result<(), ContractError> {
+        storage::extend_instance_ttl(&env);
+        let config = storage::get_fee_config(&env);
+
+        require_council_auth(&env, &config.council);
+
+        storage::set_treasury_address(&env, &new_treasury);
+
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, "fee_distributor"),
+                soroban_sdk::Symbol::new(&env, "set_treasury_address"),
+            ),
+            (new_treasury,),
         );
 
         Ok(())

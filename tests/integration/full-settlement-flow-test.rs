@@ -184,9 +184,18 @@ fn test_full_settlement_flow() {
 	// ----------------------
 	// Phase 4 — Fee Claiming
 	// ----------------------
+	let alice_balance_before = token_client.balance(&alice);
+	let fee_distributor_balance_before = token_client.balance(&fee_client.address);
+
 	// Alice claims
 	let payout = fee_client.claim(&alice);
 	assert_eq!(payout, 1);
+
+	let alice_balance_after = token_client.balance(&alice);
+	let fee_distributor_balance_after = token_client.balance(&fee_client.address);
+
+	assert_eq!(alice_balance_after, alice_balance_before + payout);
+	assert_eq!(fee_distributor_balance_after, fee_distributor_balance_before - payout);
 
 	let earnings_after = fee_client.get_earnings(&alice);
 	assert_eq!(earnings_after.unclaimed, 0);
@@ -231,7 +240,7 @@ fn test_full_settlement_flow() {
 	let init_proof = create_proof(&env, &initiator_sk, &chain_hash, 20);
 	let resp_proof = create_proof(&env, &respondent_sk, &chain_hash, 10);
 
-	let dispute_id = dispute_client.raise_dispute(&initiator, &tx_id, &init_proof);
+	let dispute_id = dispute_client.raise_dispute(&initiator, &respondent, &tx_id, &init_proof);
 	dispute_client.respond(&respondent, &dispute_id, &resp_proof);
 
 	// Resolve — respondent (carol) should win due to lower sequence

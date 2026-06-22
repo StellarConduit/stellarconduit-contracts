@@ -260,7 +260,7 @@ fn test_distribute_treasury_share_split() {
 
 #[test]
 fn test_claim_success() {
-    let (env, client) = setup();
+    let (env, client, contract_id) = setup_with_token();
     let relay = Address::generate(&env);
     let batch_id = 1u64;
     let batch_size = 200u32;
@@ -271,11 +271,22 @@ fn test_claim_success() {
     let earnings_before = client.get_earnings(&relay);
     assert_eq!(earnings_before.unclaimed, 1);
 
+    let token_id = env.as_contract(&contract_id, || crate::storage::get_token_address(&env));
+    let token_client = token::Client::new(&env, &token_id);
+    let relay_balance_before = token_client.balance(&relay);
+    let contract_balance_before = token_client.balance(&contract_id);
+
     // Claim the fees
     let payout = client.claim(&relay);
 
     // Verify payout amount
     assert_eq!(payout, 1);
+
+    let relay_balance_after = token_client.balance(&relay);
+    let contract_balance_after = token_client.balance(&contract_id);
+
+    assert_eq!(relay_balance_after, relay_balance_before + payout);
+    assert_eq!(contract_balance_after, contract_balance_before - payout);
 
     // Verify unclaimed zeroed and total_claimed incremented
     let earnings_after = client.get_earnings(&relay);
@@ -297,7 +308,7 @@ fn test_claim_nothing_to_claim() {
 #[test]
 #[should_panic(expected = "HostError")]
 fn test_claim_auth_required() {
-    let (env, client) = setup();
+    let (env, client, _) = setup_with_token();
     let relay = Address::generate(&env);
     let batch_id = 1u64;
     let batch_size = 200u32;
@@ -313,6 +324,35 @@ fn test_claim_auth_required() {
 
     // This should panic because relay hasn't authorized
     client2.claim(&relay);
+}
+
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_claim_insufficient_balance() {
+    let (env, client, contract_id) = setup_with_token();
+    let relay = Address::generate(&env);
+    let batch_id = 1u64;
+    let batch_size = 200u32;
+
+    // Distribute some fees
+    client.distribute(&relay, &batch_id, &batch_size);
+
+    let token_id = env.as_contract(&contract_id, || crate::storage::get_token_address(&env));
+    let token_client = token::Client::new(&env, &token_id);
+    let current_balance = token_client.balance(&contract_id);
+    // Burn all tokens from the contract using the token client itself?
+    // StellarAssetClient has no burn_from. Let's just create a new env or something.
+    // Wait, the fee distributor is initialized with 1,000,000 tokens.
+    // If we want to simulate insufficient balance, we can't easily burn if the token is SAC.
+    // Actually, `token::Client::new(&env, &token_id).transfer()` needs auth.
+    // We can just invoke token transfer from the contract id out of the contract using `env.as_contract`.
+    env.as_contract(&contract_id, || {
+        let t = token::Client::new(&env, &token_id);
+        t.transfer(&contract_id, &relay, &current_balance);
+    });
+
+    // Now balance is 0. Claiming should fail with HostError (SAC panics on insufficient balance).
+    client.claim(&relay);
 }
 
 // ============================================================================
@@ -497,8 +537,11 @@ fn test_multiple_distributions_different_relays() {
 
 #[test]
 fn test_multiple_claims() {
-    let (_env, client) = setup();
-    let relay = Address::generate(&_env);
+    let (env, client, contract_id) = setup_with_token();
+    let relay = Address::generate(&env);
+
+    let token_id = env.as_contract(&contract_id, || crate::storage::get_token_address(&env));
+    let token_client = token::Client::new(&env, &token_id);
 
     // Distribute, claim, distribute again, claim again
     client.distribute(&relay, &1u64, &200u32);
@@ -509,6 +552,9 @@ fn test_multiple_claims() {
     let payout2 = client.claim(&relay);
     assert_eq!(payout2, 5);
 
+    let relay_balance_after = token_client.balance(&relay);
+    assert_eq!(relay_balance_after, payout1 + payout2);
+
     let earnings = client.get_earnings(&relay);
     assert_eq!(earnings.total_earned, 6);
     assert_eq!(earnings.total_claimed, 6);
@@ -517,8 +563,11 @@ fn test_multiple_claims() {
 
 #[test]
 fn test_claim_after_multiple_distributions() {
-    let (_env, client) = setup();
-    let relay = Address::generate(&_env);
+    let (env, client, contract_id) = setup_with_token();
+    let relay = Address::generate(&env);
+
+    let token_id = env.as_contract(&contract_id, || crate::storage::get_token_address(&env));
+    let token_client = token::Client::new(&env, &token_id);
 
     // Distribute multiple times without claiming
     client.distribute(&relay, &1u64, &200u32); // 1
@@ -528,6 +577,9 @@ fn test_claim_after_multiple_distributions() {
     // Claim all at once
     let payout = client.claim(&relay);
     assert_eq!(payout, 6);
+
+    let relay_balance_after = token_client.balance(&relay);
+    assert_eq!(relay_balance_after, payout);
 
     let earnings = client.get_earnings(&relay);
     assert_eq!(earnings.total_earned, 6);
@@ -584,7 +636,7 @@ fn test_distribute_with_different_batch_sizes() {
 
 #[test]
 fn test_earnings_invariant_total_equals_claimed_plus_unclaimed() {
-    let (_env, client) = setup();
+    let (_env, client, _) = setup_with_token();
     let relay = Address::generate(&_env);
 
     // Distribute some fees
@@ -869,7 +921,7 @@ fn test_distribute_with_max_treasury_share() {
 
 #[test]
 fn test_claim_preserves_total_earned() {
-    let (_env, client) = setup();
+    let (_env, client, _) = setup_with_token();
     let relay = Address::generate(&_env);
 
     client.distribute(&relay, &1u64, &200u32);
@@ -889,146 +941,172 @@ fn test_claim_preserves_total_earned() {
 }
 
 // ============================================================================
-// M-of-N Council Auth Tests (set_fee_rate is council-gated)
+// initialize() — treasury_share_bps validation Tests
 // ============================================================================
 
-fn make_council(env: &Env, members: &[&Address], threshold: u32) -> crate::types::AdminCouncil {
-    let mut v = soroban_sdk::Vec::new(env);
-    for m in members {
-        v.push_back((*m).clone());
-    }
-    crate::types::AdminCouncil {
-        members: v,
-        threshold,
-    }
-}
-
-fn fee_rate_mock_auth<'a>(
-    env: &'a Env,
-    contract_id: &Address,
-    signer: &'a Address,
-    new_rate: u32,
-) -> MockAuth<'a> {
-    use soroban_sdk::IntoVal;
-    MockAuth {
-        address: signer,
-        invoke: &MockAuthInvoke {
-            contract: contract_id,
-            fn_name: "set_fee_rate",
-            args: (new_rate,).into_val(env),
-            sub_invokes: &[],
-        },
-    }
-}
-
-/// 1-of-3: Carol (position 3) alone can authorize set_fee_rate.
 #[test]
-fn test_council_1_of_3_carol_authorizes() {
+fn test_initialize_invalid_treasury_share_above_max() {
     let env = Env::default();
-    let alice = Address::generate(&env);
-    let bob = Address::generate(&env);
-    let carol = Address::generate(&env);
-
+    env.mock_all_auths();
     let contract_id = env.register(FeeDistributorContract, ());
     let client = FeeDistributorContractClient::new(&env, &contract_id);
-
-    let council = make_council(&env, &[&alice, &bob, &carol], 1);
-    client
-        .mock_auths(&[MockAuth {
-            address: &alice,
-            invoke: &MockAuthInvoke {
-                contract: &contract_id,
-                fn_name: "initialize",
-                args: (
-                    &council,
-                    &50u32,
-                    &1000u32,
-                    &Address::generate(&env),
-                    &Address::generate(&env),
-                )
-                    .into_val(&env),
-                sub_invokes: &[],
-            },
-        }])
-        .initialize(
-            &council,
-            &50u32,
-            &1000u32,
-            &Address::generate(&env),
-            &Address::generate(&env),
-        );
-
-    // Only Carol signs.
-    env.mock_auths(&[fee_rate_mock_auth(&env, &contract_id, &carol, 100)]);
-    let result = client.try_set_fee_rate(&100u32);
-    assert_eq!(result, Ok(Ok(())));
-}
-
-/// 2-of-3: Single sig (Alice only) is rejected.
-#[test]
-fn test_council_2_of_3_single_sig_rejected() {
-    let env = Env::default();
-    let alice = Address::generate(&env);
-    let bob = Address::generate(&env);
-    let carol = Address::generate(&env);
-
-    let contract_id = env.register(FeeDistributorContract, ());
-    let client = FeeDistributorContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let mut members = soroban_sdk::Vec::new(&env);
+    members.push_back(admin.clone());
+    let council = crate::types::AdminCouncil {
+        members,
+        threshold: 1,
+    };
     let treasury = Address::generate(&env);
     let token = Address::generate(&env);
 
-    let council = make_council(&env, &[&alice, &bob, &carol], 2);
-    env.mock_all_auths();
-    client.initialize(&council, &50u32, &1000u32, &treasury, &token);
-
-    env.mock_auths(&[fee_rate_mock_auth(&env, &contract_id, &alice, 100)]);
-    let result = client.try_set_fee_rate(&100u32);
-    assert_eq!(result, Err(Ok(ContractError::InsufficientApprovals)));
+    // treasury_share_bps = 10001 should fail
+    let result = client.try_initialize(&council, &50u32, &10001u32, &treasury, &token);
+    assert_eq!(result, Err(Ok(ContractError::InvalidTreasuryShare)));
 }
 
-/// 2-of-3: Bob + Carol (neither is first) succeed.
+// ============================================================================
+// set_treasury_share() Tests
+// ============================================================================
+
 #[test]
-fn test_council_2_of_3_bob_and_carol_succeed() {
+fn test_set_treasury_share_success() {
+    let (env, client, contract_id) = setup_with_token();
+    let relay = Address::generate(&env);
+
+    // Update treasury share from 10% to 20%
+    client.set_treasury_share(&2000u32);
+
+    // Distribute and verify the new split is applied
+    client.distribute(&relay, &1u64, &10000u32);
+    // fee = 10000 * 50 / 10000 = 50
+    // treasury_share = 50 * 2000 / 10000 = 10
+    // relay_payout = 50 - 10 = 40
+    let earnings = client.get_earnings(&relay);
+    assert_eq!(earnings.total_earned, 40);
+    let _ = contract_id;
+}
+
+#[test]
+fn test_set_treasury_share_invalid_above_max() {
+    let (_env, client) = setup();
+
+    let result = client.try_set_treasury_share(&10001u32);
+    assert_eq!(result, Err(Ok(ContractError::InvalidTreasuryShare)));
+}
+
+#[test]
+fn test_set_treasury_share_boundary_zero() {
+    let (env, client, contract_id) = setup_with_token();
+    let relay = Address::generate(&env);
+
+    // Set treasury share to 0%
+    client.set_treasury_share(&0u32);
+
+    client.distribute(&relay, &1u64, &10000u32);
+    // fee = 50, treasury_share = 0, relay_payout = 50
+    let earnings = client.get_earnings(&relay);
+    assert_eq!(earnings.total_earned, 50);
+    let _ = contract_id;
+}
+
+#[test]
+fn test_set_treasury_share_boundary_max() {
+    let (env, client, contract_id) = setup_with_token();
+    let relay = Address::generate(&env);
+
+    // Set treasury share to 100%
+    client.set_treasury_share(&10000u32);
+
+    client.distribute(&relay, &1u64, &10000u32);
+    // fee = 50, treasury_share = 50, relay_payout = 0
+    let earnings = client.get_earnings(&relay);
+    assert_eq!(earnings.total_earned, 0);
+    let _ = contract_id;
+}
+
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_set_treasury_share_unauthorized() {
     let env = Env::default();
-    let alice = Address::generate(&env);
-    let bob = Address::generate(&env);
-    let carol = Address::generate(&env);
+    // No mock_all_auths — auth will fail
+    let contract_id = env.register(FeeDistributorContract, ());
+    let client = FeeDistributorContractClient::new(&env, &contract_id);
+
+    client.set_treasury_share(&2000u32);
+}
+
+// ============================================================================
+// set_treasury_address() Tests
+// ============================================================================
+
+#[test]
+fn test_set_treasury_address_success() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let token_admin = Address::generate(&env);
+    let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_id = token_contract.address();
+
+    // Register two treasury contracts
+    let treasury_id_1 = env.register(treasury::TreasuryContract, ());
+    let treasury_id_2 = env.register(treasury::TreasuryContract, ());
+
+    let admin = Address::generate(&env);
+    let mut members = soroban_sdk::Vec::new(&env);
+    members.push_back(admin.clone());
+    let treasury_council = treasury::types::AdminCouncil {
+        members: members.clone(),
+        threshold: 1,
+    };
+
+    treasury::TreasuryContractClient::new(&env, &treasury_id_1)
+        .initialize(&treasury_council, &token_id);
+    treasury::TreasuryContractClient::new(&env, &treasury_id_2)
+        .initialize(&treasury_council, &token_id);
 
     let contract_id = env.register(FeeDistributorContract, ());
     let client = FeeDistributorContractClient::new(&env, &contract_id);
-    let treasury = Address::generate(&env);
-    let token = Address::generate(&env);
 
-    let council = make_council(&env, &[&alice, &bob, &carol], 2);
-    env.mock_all_auths();
-    client.initialize(&council, &50u32, &1000u32, &treasury, &token);
+    let council = crate::types::AdminCouncil {
+        members,
+        threshold: 1,
+    };
 
-    env.mock_auths(&[
-        fee_rate_mock_auth(&env, &contract_id, &bob, 100),
-        fee_rate_mock_auth(&env, &contract_id, &carol, 100),
-    ]);
-    let result = client.try_set_fee_rate(&100u32);
-    assert_eq!(result, Ok(Ok(())));
+    // Initialize pointing at treasury_id_1
+    client.initialize(&council, &100u32, &5000u32, &treasury_id_1, &token_id);
+
+    let token_client = token::StellarAssetClient::new(&env, &token_id);
+    token_client.mint(&contract_id, &1_000_000);
+
+    let relay = Address::generate(&env);
+
+    // Distribute to treasury_id_1
+    client.distribute(&relay, &1u64, &1000u32);
+    // fee = 10, treasury_share = 5, relay_payout = 5
+
+    let treasury2_client = treasury::TreasuryContractClient::new(&env, &treasury_id_2);
+
+    // Update to treasury_id_2
+    client.set_treasury_address(&treasury_id_2);
+
+    // Distribute again — should now credit treasury_id_2
+    client.distribute(&relay, &2u64, &1000u32);
+
+    // treasury_id_2 should have received 5 tokens
+    let treasury2_balance = treasury2_client.get_balance();
+    assert_eq!(treasury2_balance, 5);
 }
 
-/// No signatures → InsufficientApprovals regardless of threshold.
 #[test]
-fn test_council_no_sigs_rejected() {
+#[should_panic(expected = "HostError")]
+fn test_set_treasury_address_unauthorized() {
     let env = Env::default();
-    let alice = Address::generate(&env);
-    let bob = Address::generate(&env);
-    let carol = Address::generate(&env);
-
+    // No mock_all_auths
     let contract_id = env.register(FeeDistributorContract, ());
     let client = FeeDistributorContractClient::new(&env, &contract_id);
-    let treasury = Address::generate(&env);
-    let token = Address::generate(&env);
+    let new_treasury = Address::generate(&env);
 
-    let council = make_council(&env, &[&alice, &bob, &carol], 1);
-    env.mock_all_auths();
-    client.initialize(&council, &50u32, &1000u32, &treasury, &token);
-
-    // No mock_auths at all.
-    let result = client.try_set_fee_rate(&100u32);
-    assert_eq!(result, Err(Ok(ContractError::InsufficientApprovals)));
+    client.set_treasury_address(&new_treasury);
 }

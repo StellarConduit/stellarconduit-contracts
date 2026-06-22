@@ -43,4 +43,7 @@ pub enum ContractError {
 
     /// Council config is invalid (threshold > members, etc.).
     InvalidCouncilConfig = 11,
+
+    /// Treasury share bps is outside the allowed range (must be <= 10000).
+    InvalidTreasuryShare = 12,
 }

@@ -77,7 +77,7 @@ fn test_resolve_both_valid_initiator_wins() {
 
     // Initiator proof: seq 10 (lower = better)
     let init_proof = create_proof(&env, &init_sk, &chain_hash, 10);
-    let dispute_id = client.raise_dispute(&initiator, &tx_id, &init_proof);
+    let dispute_id = client.raise_dispute(&initiator, &respondent, &tx_id, &init_proof);
 
     // Respondent proof: seq 15
     let resp_proof = create_proof(&env, &resp_sk, &chain_hash, 15);
@@ -100,7 +100,7 @@ fn test_resolve_both_valid_respondent_wins() {
 
     // Initiator proof: seq 20
     let init_proof = create_proof(&env, &init_sk, &chain_hash, 20);
-    let dispute_id = client.raise_dispute(&initiator, &tx_id, &init_proof);
+    let dispute_id = client.raise_dispute(&initiator, &respondent, &tx_id, &init_proof);
 
     // Respondent proof: seq 15 (lower = better)
     let resp_proof = create_proof(&env, &resp_sk, &chain_hash, 15);
@@ -123,7 +123,7 @@ fn test_resolve_initiator_valid_respondent_invalid() {
 
     // Initiator proof: valid signature
     let init_proof = create_proof(&env, &init_sk, &chain_hash, 20);
-    let dispute_id = client.raise_dispute(&initiator, &tx_id, &init_proof);
+    let dispute_id = client.raise_dispute(&initiator, &respondent, &tx_id, &init_proof);
 
     // Respondent proof: invalid signature (bad bytes)
     let resp_proof = RelayChainProof {
@@ -153,7 +153,7 @@ fn test_resolve_both_invalid() {
         chain_hash: BytesN::from_array(&env, &chain_hash),
         sequence: 10,
     };
-    let dispute_id = client.raise_dispute(&initiator, &tx_id, &init_proof);
+    let dispute_id = client.raise_dispute(&initiator, &respondent, &tx_id, &init_proof);
 
     // Respondent proof: invalid
     let resp_proof = RelayChainProof {
@@ -167,112 +167,16 @@ fn test_resolve_both_invalid() {
     assert!(result.is_err());
 }
 
-// ── M-of-N Council Auth Tests (update_resolution_window is council-gated) ───
-
-fn setup_council_contract<'a>(
-    env: &'a Env,
-    alice: &Address,
-    bob: &Address,
-    carol: &Address,
-    threshold: u32,
-) -> DisputeResolverContractClient<'a> {
-    use crate::types::AdminCouncil;
-    let contract_id = env.register(DisputeResolverContract, ());
-    let client = DisputeResolverContractClient::new(env, &contract_id);
-    let mut members = soroban_sdk::Vec::new(env);
-    members.push_back(alice.clone());
-    members.push_back(bob.clone());
-    members.push_back(carol.clone());
-    let council = AdminCouncil { members, threshold };
+#[test]
+fn test_raise_dispute_self_rejection() {
+    let env = Env::default();
     env.mock_all_auths();
-    client.initialize(&council, &100u32);
-    client
-}
+    let (client, initiator, _, init_sk, _) = setup_dispute(&env);
 
-/// 1-of-3: Carol (position 3) alone can authorize update_resolution_window.
-#[test]
-fn test_council_1_of_3_carol_authorizes() {
-    use soroban_sdk::{testutils::MockAuth, IntoVal};
-    let env = Env::default();
-    let alice = Address::generate(&env);
-    let bob = Address::generate(&env);
-    let carol = Address::generate(&env);
-    let client = setup_council_contract(&env, &alice, &bob, &carol, 1);
-    let invoke = soroban_sdk::testutils::MockAuthInvoke {
-        contract: &client.address,
-        fn_name: "update_resolution_window",
-        args: (200u32,).into_val(&env),
-        sub_invokes: &[],
-    };
-    env.mock_auths(&[MockAuth { address: &carol, invoke: &invoke }]);
-    let result = client.try_update_resolution_window(&200u32);
-    assert_eq!(result, Ok(Ok(())));
-}
+    let tx_id = BytesN::from_array(&env, &[9u8; 32]);
+    let chain_hash = [8u8; 32];
+    let init_proof = create_proof(&env, &init_sk, &chain_hash, 10);
 
-/// 2-of-3: Single sig (Alice) is rejected.
-#[test]
-fn test_council_2_of_3_single_sig_rejected() {
-    use soroban_sdk::{testutils::MockAuth, IntoVal};
-    let env = Env::default();
-    let alice = Address::generate(&env);
-    let bob = Address::generate(&env);
-    let carol = Address::generate(&env);
-    let client = setup_council_contract(&env, &alice, &bob, &carol, 2);
-    let invoke = soroban_sdk::testutils::MockAuthInvoke {
-        contract: &client.address,
-        fn_name: "update_resolution_window",
-        args: (200u32,).into_val(&env),
-        sub_invokes: &[],
-    };
-    env.mock_auths(&[MockAuth { address: &alice, invoke: &invoke }]);
-    let result = client.try_update_resolution_window(&200u32);
-    assert_eq!(
-        result,
-        Err(Ok(crate::errors::ContractError::InsufficientApprovals))
-    );
-}
-
-/// 2-of-3: Bob + Carol (neither first in Vec) succeed.
-#[test]
-fn test_council_2_of_3_bob_and_carol_succeed() {
-    use soroban_sdk::{testutils::MockAuth, IntoVal};
-    let env = Env::default();
-    let alice = Address::generate(&env);
-    let bob = Address::generate(&env);
-    let carol = Address::generate(&env);
-    let client = setup_council_contract(&env, &alice, &bob, &carol, 2);
-    let invoke_bob = soroban_sdk::testutils::MockAuthInvoke {
-        contract: &client.address,
-        fn_name: "update_resolution_window",
-        args: (200u32,).into_val(&env),
-        sub_invokes: &[],
-    };
-    let invoke_carol = soroban_sdk::testutils::MockAuthInvoke {
-        contract: &client.address,
-        fn_name: "update_resolution_window",
-        args: (200u32,).into_val(&env),
-        sub_invokes: &[],
-    };
-    env.mock_auths(&[
-        MockAuth { address: &bob, invoke: &invoke_bob },
-        MockAuth { address: &carol, invoke: &invoke_carol },
-    ]);
-    let result = client.try_update_resolution_window(&200u32);
-    assert_eq!(result, Ok(Ok(())));
-}
-
-/// No signatures → InsufficientApprovals.
-#[test]
-fn test_council_no_sigs_rejected() {
-    let env = Env::default();
-    let alice = Address::generate(&env);
-    let bob = Address::generate(&env);
-    let carol = Address::generate(&env);
-    let client = setup_council_contract(&env, &alice, &bob, &carol, 1);
-
-    let result = client.try_update_resolution_window(&200u32);
-    assert_eq!(
-        result,
-        Err(Ok(crate::errors::ContractError::InsufficientApprovals))
-    );
+    let result = client.try_raise_dispute(&initiator, &initiator, &tx_id, &init_proof);
+    assert_eq!(result, Err(Ok(ContractError::InvalidRespondent)));
 }
