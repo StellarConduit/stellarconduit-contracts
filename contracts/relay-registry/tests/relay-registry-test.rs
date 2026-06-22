@@ -23,7 +23,15 @@ fn setup<'a>() -> (Env, RelayRegistryContractClient<'a>, Address) {
         threshold: 1,
     };
 
-    client.initialize(&council, &100i128, &10u32);
+    let token_address = Address::generate(&env);
+    let treasury_address = Address::generate(&env);
+    client.initialize(
+        &council,
+        &token_address,
+        &treasury_address,
+        &100i128,
+        &10u32,
+    );
     (env, client, admin)
 }
 
@@ -165,11 +173,15 @@ fn test_update_metadata_auth_required_clean() {
         threshold: 1,
     };
 
-    // Hack: to initialize and register without `mock_all_auths`,
-    // we just don't call `mock_all_auths` and let it panic on `initialize` because
-    // `require_auth` isn't called in `initialize`!
-    // Wait, `initialize` does not call `require_auth`!
-    client.initialize(&council, &100i128, &10u32);
+    let token_address = Address::generate(&env);
+    let treasury_address = Address::generate(&env);
+    client.initialize(
+        &council,
+        &token_address,
+        &treasury_address,
+        &100i128,
+        &10u32,
+    );
 
     let node_addr = Address::generate(&env);
 
