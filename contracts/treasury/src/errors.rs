@@ -50,4 +50,7 @@ pub enum ContractError {
 
     /// Program name length is out of bounds.
     InvalidProgramName = 15,
+
+    /// Allocation would exceed program budget (alias for ProgramOverBudget, per issue spec).
+    BudgetExceeded = 16,
 }
