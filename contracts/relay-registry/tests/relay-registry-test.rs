@@ -76,11 +76,15 @@ fn get_lock_entry(
     client: &RelayRegistryContractClient,
     node: &Address,
 ) -> Option<StakeEntry> {
-    env.as_contract(&client.address, || relay_registry::storage::get_lock_entry(env, node))
+    env.as_contract(&client.address, || {
+        relay_registry::storage::get_lock_entry(env, node)
+    })
 }
 
 fn get_lock_period(env: &Env, client: &RelayRegistryContractClient) -> u32 {
-    env.as_contract(&client.address, || relay_registry::storage::get_stake_lock_period(env))
+    env.as_contract(&client.address, || {
+        relay_registry::storage::get_stake_lock_period(env)
+    })
 }
 
 fn advance_past_lock_period(env: &Env, client: &RelayRegistryContractClient) {
@@ -812,7 +816,10 @@ fn test_reinstated_node_must_restake_to_become_active() {
 
     let record = client.get_node(&node);
     assert_eq!(record.status, NodeStatus::Inactive);
-    assert_eq!(record.stake, 0, "reinstated node should not regain slashed stake");
+    assert_eq!(
+        record.stake, 0,
+        "reinstated node should not regain slashed stake"
+    );
 
     token_admin.mint(&node, &1_000);
     client.stake(&node, &1_000);
@@ -839,5 +846,8 @@ fn test_finalize_unstake_before_lock_period_fails() {
     client.unstake(&node, &1_000);
 
     let result = client.try_finalize_unstake(&node);
-    assert!(result.is_err(), "should not be able to finalize before lock expires");
+    assert!(
+        result.is_err(),
+        "should not be able to finalize before lock expires"
+    );
 }
