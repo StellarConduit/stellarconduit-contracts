@@ -88,6 +88,8 @@ pub struct SpendingProgram {
     pub active: bool,
     /// Human-readable name/description.
     pub name: String,
+    /// Address that receives disbursed tokens when allocate() is called.
+    pub recipient_address: Address,
 }
 
 /// Aggregate statistics for the treasury, used for dashboard integration.

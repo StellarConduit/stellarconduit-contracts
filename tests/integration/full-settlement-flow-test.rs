@@ -94,12 +94,7 @@ fn setup_all<'a>() -> (
 		threshold: 1,
 	};
 	// min_stake = 100, stake_lock_period = 10 ledgers
-	relay_client.initialize(&relay_council, &100i128, &10u32);
-
-	// Set token address in relay registry storage (init doesn't take token address)
-	env.as_contract(&relay_client.address, || {
-		relay_registry::storage::set_token_address(&env, &token_id);
-	});
+	relay_client.initialize(&relay_council, &token_id, &treasury_id, &100i128, &10u32);
 
 	// Deploy dispute resolver and initialize
 	let dispute_id = env.register(dispute_resolver::DisputeResolverContract, ());
