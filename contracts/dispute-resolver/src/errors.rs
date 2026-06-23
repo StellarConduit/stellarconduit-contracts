@@ -48,4 +48,7 @@ pub enum ContractError {
     InvalidRespondent = 17,
     /// Thrown when someone other than the registered respondent attempts to respond.
     UnauthorizedRespondent = 16,
+
+    /// Protocol is paused; operation is blocked until unpaused.
+    ProtocolPaused = 17,
 }

@@ -26,7 +26,7 @@
 //! implementation tracked in GitHub issue
 
 #![no_std]
-use soroban_sdk::{contract, contractimpl, token, Address, Env, String};
+use soroban_sdk::{contract, contractimpl, panic_with_error, token, Address, Env, String};
 
 pub mod errors;
 pub mod storage;
@@ -34,6 +34,18 @@ pub mod types;
 
 use crate::errors::ContractError;
 use crate::types::{AdminCouncil, NodeMetadata, NodeStatus, RelayNode, StakeEntry};
+
+fn require_not_paused(env: &Env) {
+    let pause_addr = storage::get_pause_contract_address(env);
+    let is_paused: bool = env.invoke_contract(
+        &pause_addr,
+        &soroban_sdk::Symbol::new(env, "is_paused"),
+        soroban_sdk::Vec::new(env),
+    );
+    if is_paused {
+        panic_with_error!(env, ContractError::ProtocolPaused);
+    }
+}
 
 fn require_council_auth(env: &Env) {
     let council = storage::get_admin_council(env);
@@ -125,6 +137,7 @@ impl RelayRegistryContract {
         treasury_address: Address,
         min_stake: i128,
         stake_lock_period: u32,
+        pause_contract_address: Address,
     ) -> Result<(), ContractError> {
         storage::extend_instance_ttl(&env);
         // Guard against re-initialization
@@ -155,6 +168,7 @@ impl RelayRegistryContract {
         let _ = treasury_address; // Stored in fee-distributor, accepted here for signature alignment
         storage::set_min_stake(&env, min_stake);
         storage::set_stake_lock_period(&env, stake_lock_period);
+        storage::set_pause_contract_address(&env, &pause_contract_address);
 
         // Initialize node count
         storage::set_node_count(&env, 0);
@@ -271,6 +285,7 @@ impl RelayRegistryContract {
     /// - `ContractError::Overflow` if adding the stake causes an arithmetic overflow.
     pub fn stake(env: Env, node_address: Address, amount: i128) -> Result<(), ContractError> {
         storage::extend_instance_ttl(&env);
+        require_not_paused(&env);
         node_address.require_auth();
 
         let mut node =
@@ -319,6 +334,7 @@ impl RelayRegistryContract {
         amount: i128,
     ) -> Result<RelayNode, ContractError> {
         storage::extend_instance_ttl(&env);
+        require_not_paused(&env);
         node_address.require_auth();
         if amount <= 0 {
             return Err(ContractError::InsufficientStake);
@@ -383,6 +399,7 @@ impl RelayRegistryContract {
     /// - `ContractError::LockPeriodActive` if the lock duration hasn't concluded yet.
     pub fn finalize_unstake(env: Env, node_address: Address) -> Result<i128, ContractError> {
         storage::extend_instance_ttl(&env);
+        require_not_paused(&env);
         node_address.require_auth();
 
         let entry =

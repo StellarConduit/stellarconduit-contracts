@@ -41,7 +41,13 @@ fn setup_dispute<'a>(
         members,
         threshold: 1,
     };
-    client.initialize(&council, &registry_id, &100);
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut pm = soroban_sdk::Vec::new(env);
+    pm.push_back(admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(env, &pause_id).initialize(
+        &emergency_pause::types::AdminCouncil { members: pm, threshold: 1 },
+    );
+   client.initialize(&council, &registry_id, &100, &pause_id);
 
     let initiator = Address::generate(env);
     let respondent = Address::generate(env);

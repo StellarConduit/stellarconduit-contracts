@@ -39,6 +39,8 @@ pub enum DataKey {
     TreasuryAddress,
     /// Stores the token contract address.
     TokenAddress,
+    /// Stores the emergency pause contract address.
+    PauseContractAddress,
 }
 
 /// Load the earnings record for a relay node. Returns a zeroed record if not found.
@@ -195,4 +197,19 @@ pub fn set_token_address(env: &Env, address: &Address) {
     env.storage()
         .instance()
         .set(&DataKey::TokenAddress, address);
+}
+
+/// Load the emergency pause contract address.
+pub fn get_pause_contract_address(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&DataKey::PauseContractAddress)
+        .expect("pause contract address not initialized")
+}
+
+/// Set the emergency pause contract address.
+pub fn set_pause_contract_address(env: &Env, address: &Address) {
+    env.storage()
+        .instance()
+        .set(&DataKey::PauseContractAddress, address);
 }

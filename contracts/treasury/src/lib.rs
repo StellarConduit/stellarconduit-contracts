@@ -27,7 +27,7 @@
 
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, token, Address, Env, String};
+use soroban_sdk::{contract, contractimpl, panic_with_error, token, Address, Env, String};
 
 pub mod errors;
 pub mod storage;
@@ -49,6 +49,18 @@ fn require_council_auth(env: &Env) {
 
     if authorized < council.threshold {
         panic!("Insufficient approvals");
+    }
+}
+
+fn require_not_paused(env: &Env) {
+    let pause_addr = storage::get_pause_contract_address(env);
+    let is_paused: bool = env.invoke_contract(
+        &pause_addr,
+        &soroban_sdk::Symbol::new(env, "is_paused"),
+        soroban_sdk::Vec::new(env),
+    );
+    if is_paused {
+        panic_with_error!(env, ContractError::ProtocolPaused);
     }
 }
 
@@ -80,6 +92,7 @@ impl TreasuryContract {
         env: Env,
         council: AdminCouncil,
         token_address: Address,
+        pause_contract_address: Address,
     ) -> Result<(), ContractError> {
         storage::extend_instance_ttl(&env);
         if storage::has_admin_council(&env) {
@@ -92,6 +105,7 @@ impl TreasuryContract {
 
         storage::set_admin_council(&env, &council);
         storage::set_token_address(&env, &token_address);
+        storage::set_pause_contract_address(&env, &pause_contract_address);
         storage::set_balance(&env, 0);
 
         Ok(())
@@ -339,6 +353,7 @@ impl TreasuryContract {
     /// - `ContractError::Overflow` if arithmetic overflows.
     pub fn allocate(env: Env, program_id: u64, amount: i128) -> Result<(), ContractError> {
         storage::extend_instance_ttl(&env);
+        require_not_paused(&env);
         require_council_auth(&env);
 
         if amount <= 0 {

@@ -47,6 +47,7 @@ pub enum DataKey {
     AdminCouncil,
     TokenAddress,
     LockEntry(Address),
+    PauseContractAddress,
 }
 
 pub fn get_node(env: &Env, address: &Address) -> Option<RelayNode> {
@@ -171,4 +172,17 @@ pub fn remove_lock_entry(env: &Env, address: &Address) {
     env.storage()
         .persistent()
         .remove(&DataKey::LockEntry(address.clone()));
+}
+
+pub fn get_pause_contract_address(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&DataKey::PauseContractAddress)
+        .expect("pause contract address not initialized")
+}
+
+pub fn set_pause_contract_address(env: &Env, address: &Address) {
+    env.storage()
+        .instance()
+        .set(&DataKey::PauseContractAddress, address);
 }

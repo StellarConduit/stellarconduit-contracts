@@ -53,4 +53,7 @@ pub enum ContractError {
 
     /// Allocation would exceed program budget (alias for ProgramOverBudget, per issue spec).
     BudgetExceeded = 16,
+  
+  /// Protocol is paused; operation is blocked until unpaused.
+    ProtocolPaused = 17,
 }
