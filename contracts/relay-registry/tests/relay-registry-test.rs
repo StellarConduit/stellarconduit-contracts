@@ -33,7 +33,16 @@ fn setup<'a>() -> (Env, RelayRegistryContractClient<'a>, Address) {
         threshold: 1,
     };
     let pause_id = make_pause(&env, &admin);
-    client.initialize(&council, &100i128, &10u32, &pause_id);
+    let token_address = Address::generate(&env);
+    let treasury_address = Address::generate(&env);
+    client.initialize(
+        &council,
+        &token_address,
+        &treasury_address,
+        &100i128,
+        &10u32,
+    &pause_id,
+    );
     (env, client, admin)
 }
 
@@ -195,7 +204,21 @@ fn test_update_metadata_auth_required_clean() {
     };
     client2.initialize(&council2, &100i128, &10u32, &pause_id2);
 
-    let node_addr = Address::generate(&env2);
+  let node_addr = Address::generate(&env2);
+  let token_address = Address::generate(&env);
+    let treasury_address = Address::generate(&env);
+    client.initialize(
+        &council,
+        &token_address,
+        &treasury_address,
+        &100i128,
+        &10u32,
+    );
+
+
+    // `register` calls `require_auth`, so this will panic before we even get to `update_metadata`.
+    // So we can just test `update_metadata` directly and it will panic on auth.
+    // Actually we can't because `update_metadata` also fails on `NotRegistered` before auth? No, `require_auth` is called FIRST.
     let new_metadata = NodeMetadata {
         region: String::from_str(&env2, "eu-west"),
         capacity: 2000,

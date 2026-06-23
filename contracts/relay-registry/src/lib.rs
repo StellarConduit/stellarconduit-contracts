@@ -133,6 +133,8 @@ impl RelayRegistryContract {
     pub fn initialize(
         env: Env,
         council: AdminCouncil,
+        token_address: Address,
+        treasury_address: Address,
         min_stake: i128,
         stake_lock_period: u32,
         pause_contract_address: Address,
@@ -162,6 +164,8 @@ impl RelayRegistryContract {
 
         // Persist config
         storage::set_admin_council(&env, &council);
+        storage::set_token_address(&env, &token_address);
+        let _ = treasury_address; // Stored in fee-distributor, accepted here for signature alignment
         storage::set_min_stake(&env, min_stake);
         storage::set_stake_lock_period(&env, stake_lock_period);
         storage::set_pause_contract_address(&env, &pause_contract_address);

@@ -106,3 +106,28 @@ jobs:
               exit 1
             fi
           done <<< "$wasms"
+
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Stellar CLI
+        uses: stellar/stellar-cli@v23.0.1
+
+      - name: Run Integration Tests
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/run-integration-tests.sh
+

@@ -72,7 +72,7 @@ fn setup_all<'a>() -> (
 		threshold: 1,
 	};
 	// min_stake = 100, stake_lock_period = 10 ledgers
-	relay_client.initialize(&relay_council, &100i128, &10u32, &pause_id);
+	relay_client.initialize(&relay_council, &token_id, &treasury_id, &100i128, &10u32, &pause_id);
 
 	// Set token address in relay registry storage (init doesn't take token address)
 	env.as_contract(&relay_client.address, || {
