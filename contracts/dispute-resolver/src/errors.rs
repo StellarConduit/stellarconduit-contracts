@@ -45,7 +45,7 @@ pub enum ContractError {
     /// Thrown when initialization is attempted after the contract is already initialized.
     AlreadyInitialized = 14,
     /// Thrown when the initiator attempts to create a dispute against themselves.
-    InvalidRespondent = 15,
+    InvalidRespondent = 17,
     /// Thrown when someone other than the registered respondent attempts to respond.
     UnauthorizedRespondent = 16,
 }

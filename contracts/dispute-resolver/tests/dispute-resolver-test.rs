@@ -409,8 +409,8 @@ fn test_resolve_no_response_expired() {
 #[test]
 #[should_panic(expected = "Error(Contract, #16)")] // UnauthorizedRespondent
 fn test_respond_unauthorized_respondent() {
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client);
+    let (env, client, _, registry) = setup();
+    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client, &registry);
 
     // Create a third party
     let unauthorized = Address::generate(&env);

@@ -94,7 +94,6 @@ impl DisputeResolverContract {
             dispute_id,
             tx_id: tx_id.clone(),
             initiator: initiator.clone(),
-            respondent: Some(respondent.clone()),
             respondent: respondent.clone(),
             initiator_proof: proof,
             respondent_proof: OptionalRelayChainProof::None,
@@ -142,12 +141,6 @@ impl DisputeResolverContract {
 
         let mut dispute =
             storage::get_dispute(&env, dispute_id).ok_or(ContractError::DisputeNotFound)?;
-
-        if let Some(expected_respondent) = dispute.respondent.clone() {
-            if expected_respondent != respondent {
-                return Err(ContractError::Unauthorized);
-            }
-        }
 
         // Validate that the respondent is still active in the relay registry.
         Self::require_active_node(&env, &respondent)?;
@@ -344,8 +337,7 @@ impl DisputeResolverContract {
     fn verify_proof(env: &Env, public_key: &BytesN<32>, proof: &RelayChainProof) -> bool {
         let message: Bytes = proof.chain_hash.clone().into();
         env.crypto()
-            .ed25519_verify(public_key, &message, &proof.signature);
-        true
+            .ed25519_verify(public_key, &message, &proof.signature)
     }
 
     fn require_active_node(env: &Env, node: &Address) -> Result<(), ContractError> {
