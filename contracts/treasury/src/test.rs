@@ -181,8 +181,12 @@ fn test_allocate_by_admin() {
     let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
     let mut pm = soroban_sdk::Vec::new(&env);
     pm.push_back(admin.clone());
-    emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id)
-        .initialize(&emergency_pause::types::AdminCouncil { members: pm, threshold: 1 });
+    emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id).initialize(
+        &emergency_pause::types::AdminCouncil {
+            members: pm,
+            threshold: 1,
+        },
+    );
 
     env.as_contract(&client.address, || {
         let mut members = soroban_sdk::Vec::new(&env);
@@ -215,12 +219,21 @@ fn test_allocate_by_admin() {
     assert_eq!(bal, 8000);
 }
 
-fn setup_allocate_context<'a>(env: &Env, client: &TreasuryContractClient<'a>, admin: &Address, token_address: &Address) {
+fn setup_allocate_context<'a>(
+    env: &Env,
+    client: &TreasuryContractClient<'a>,
+    admin: &Address,
+    token_address: &Address,
+) {
     let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
     let mut pm = soroban_sdk::Vec::new(env);
     pm.push_back(admin.clone());
-    emergency_pause::EmergencyPauseContractClient::new(env, &pause_id)
-        .initialize(&emergency_pause::types::AdminCouncil { members: pm, threshold: 1 });
+    emergency_pause::EmergencyPauseContractClient::new(env, &pause_id).initialize(
+        &emergency_pause::types::AdminCouncil {
+            members: pm,
+            threshold: 1,
+        },
+    );
     env.as_contract(&client.address, || {
         let mut members = soroban_sdk::Vec::new(env);
         members.push_back(admin.clone());

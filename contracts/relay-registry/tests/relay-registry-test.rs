@@ -185,7 +185,10 @@ fn test_update_metadata_auth_required_clean() {
     let admin2 = Address::generate(&env2);
     let mut members2 = soroban_sdk::Vec::new(&env2);
     members2.push_back(admin2.clone());
-    let council2 = AdminCouncil { members: members2, threshold: 1 };
+    let council2 = AdminCouncil {
+        members: members2,
+        threshold: 1,
+    };
     let pause_id2 = {
         env2.mock_all_auths();
         make_pause(&env2, &admin2)
