@@ -83,7 +83,7 @@ fn setup_all<'a>() -> (
 	let dispute_id = env.register(dispute_resolver::DisputeResolverContract, ());
 	let dispute_client = dispute_resolver::DisputeResolverContractClient::new(&env, &dispute_id);
 	let dispute_council = dispute_resolver::types::AdminCouncil { members, threshold: 1 };
-	dispute_client.initialize(&dispute_council, &100u32, &pause_id);
+	dispute_client.initialize(&dispute_council, &relay_id, &100u32, &pause_id);
 
 	(env, relay_client, fee_client, dispute_client, treasury_client, token_client, pause_client)
 }

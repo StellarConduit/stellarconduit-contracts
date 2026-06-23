@@ -1,6 +1,23 @@
 use super::*;
 use crate::types::RelayChainProof;
-use soroban_sdk::{testutils::Address as _, Address, BytesN, Env};
+use soroban_sdk::{contract, contractimpl, testutils::Address as _, Address, BytesN, Env};
+
+#[contract]
+pub struct MockRelayRegistryContract;
+
+#[contractimpl]
+impl MockRelayRegistryContract {
+    pub fn set_active(env: Env, address: Address, active: bool) {
+        env.storage().persistent().set(&address, &active);
+    }
+
+    pub fn is_active(env: Env, address: Address) -> bool {
+        env.storage()
+            .persistent()
+            .get::<_, bool>(&address)
+            .unwrap_or(false)
+    }
+}
 
 fn setup_dispute<'a>(
     env: &'a Env,
@@ -13,6 +30,9 @@ fn setup_dispute<'a>(
 ) {
     let contract_id = env.register(DisputeResolverContract, ());
     let client = DisputeResolverContractClient::new(env, &contract_id);
+
+    let registry_id = env.register(MockRelayRegistryContract, ());
+    let registry_client = MockRelayRegistryContractClient::new(env, &registry_id);
 
     let admin = Address::generate(env);
     let mut members = soroban_sdk::Vec::new(env);
@@ -27,10 +47,14 @@ fn setup_dispute<'a>(
     emergency_pause::EmergencyPauseContractClient::new(env, &pause_id).initialize(
         &emergency_pause::types::AdminCouncil { members: pm, threshold: 1 },
     );
-    client.initialize(&council, &100, &pause_id);
+   client.initialize(&council, &registry_id, &100, &pause_id);
 
     let initiator = Address::generate(env);
     let respondent = Address::generate(env);
+
+    // Mark both participants active in the mock registry.
+    registry_client.set_active(&initiator, &true);
+    registry_client.set_active(&respondent, &true);
 
     // Generate real Ed25519 keypairs for signing test proofs
     let initiator_sk = ed25519_dalek::SigningKey::from_bytes(&[1u8; 32]);
