@@ -61,6 +61,8 @@ pub enum DataKey {
     TokenAddress,
     /// Aggregate treasury statistics for dashboard integration.
     Stats,
+    /// The emergency pause contract address.
+    PauseContractAddress,
 }
 
 pub fn get_balance(env: &Env) -> i128 {
@@ -228,4 +230,19 @@ pub fn get_stats(env: &Env) -> TreasuryStats {
 /// Persist the treasury statistics.
 pub fn set_stats(env: &Env, stats: &TreasuryStats) {
     env.storage().instance().set(&DataKey::Stats, stats);
+}
+
+/// Load the emergency pause contract address.
+pub fn get_pause_contract_address(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&DataKey::PauseContractAddress)
+        .expect("pause contract address not initialized")
+}
+
+/// Set the emergency pause contract address.
+pub fn set_pause_contract_address(env: &Env, address: &Address) {
+    env.storage()
+        .instance()
+        .set(&DataKey::PauseContractAddress, address);
 }

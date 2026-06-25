@@ -112,19 +112,35 @@ stellar keys fund testnet-deployer --network testnet
 stellar account show testnet-deployer --network testnet
 ```
 
-### 2. (Optional) Deploy Using the Helper Script
+### 2. Automated Deployment Using Helper Scripts
 
-If you prefer to use the project-provided helper script:
+You can build, deploy, initialize, and wire all contracts using the project-provided helper scripts:
 
-```bash
-# Deploy the relay registry
-bash scripts/deploy-testnet.sh relay-registry
+1. **Configure Environment:** Copy the template configuration file and customize your values:
+   ```bash
+   cp scripts/.env.example scripts/.env
+   # Edit scripts/.env to configure the target NETWORK, ADMIN keys, and RPC endpoints.
+   ```
+2. **Deploy All Contracts:** Run the deployment script to compile all contracts to WASM and deploy them to the target network in the correct dependency order:
+   ```bash
+   bash scripts/deploy-all.sh
+   ```
+   This script writes the deployed contract IDs to `scripts/.deployed-addresses.env`. If `SAC_TOKEN_ADDRESS` is left blank on a local or testnet network, it will automatically deploy and wrap the native XLM token.
+3. **Initialize All Contracts:** Run the initialization script to configure the contract parameters and cross-contract address references automatically:
+   ```bash
+   bash scripts/initialize-all.sh
+   ```
+4. **Register and Stake a Relay Node:** Use the registration script to easily onboard a new node:
+   ```bash
+   bash scripts/register-relay-node.sh <NODE_ADDRESS_OR_SECRET> <STAKE_AMOUNT> [REGION]
+   ```
+5. **Run Local Sandbox Integration Tests:** Run the E2E integration tests inside a local Stellar Quickstart Docker container sandbox:
+   ```bash
+   bash scripts/run-integration-tests.sh
+   ```
 
-# Deploy all contracts
-bash scripts/deploy-testnet.sh all
-```
+The remainder of this section documents the **equivalent manual steps** using the `stellar` CLI directly.
 
-The remainder of this section documents the **equivalent manual steps** using `stellar` directly.
 
 ### 3. Manual Deployment (Topological Order)
 

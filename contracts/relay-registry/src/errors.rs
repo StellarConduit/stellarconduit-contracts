@@ -74,4 +74,7 @@ pub enum ContractError {
 
     /// Contract has not been initialized (required config missing).
     NotInitialized = 17,
+
+    /// Protocol is paused; operation is blocked until unpaused.
+    ProtocolPaused = 18,
 }

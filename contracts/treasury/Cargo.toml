@@ -5,13 +5,14 @@ edition = "2021"
 publish = false
 
 [lib]
-crate-type = ["rlib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 soroban-sdk = { workspace = true }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
+emergency-pause = { path = "../emergency-pause", features = ["testutils"] }
 
 [features]
 testutils = ["soroban-sdk/testutils"]

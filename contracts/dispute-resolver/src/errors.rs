@@ -36,6 +36,8 @@ pub enum ContractError {
     NotOpen = 10,
     /// Thrown when the response deadline has already passed.
     ResolutionWindowExpired = 11,
+    /// Thrown when a dispute participant is not active in the registry.
+    NodeNotActive = 15,
     /// Thrown when resolution is attempted while the respondent window is still active.
     ResolutionWindowActive = 12,
     /// Thrown when contract initialization has not been performed yet.
@@ -43,7 +45,10 @@ pub enum ContractError {
     /// Thrown when initialization is attempted after the contract is already initialized.
     AlreadyInitialized = 14,
     /// Thrown when the initiator attempts to create a dispute against themselves.
-    InvalidRespondent = 15,
+    InvalidRespondent = 17,
     /// Thrown when someone other than the registered respondent attempts to respond.
     UnauthorizedRespondent = 16,
+
+    /// Protocol is paused; operation is blocked until unpaused.
+    ProtocolPaused = 18,
 }

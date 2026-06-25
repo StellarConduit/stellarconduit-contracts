@@ -17,7 +17,7 @@
 //! - `resolve(env, dispute_id)` — Resolve a dispute after the evaluation period
 //! - `get_dispute(env, dispute_id)` — Fetch dispute details and current status
 //! - `get_ruling(env, dispute_id)` — Fetch the final ruling for a resolved dispute
-//! - `initialize(env, admin, resolution_window)` — One-time setup for the contract
+//! - `initialize(env, admin, registry, resolution_window)` — One-time setup for the contract with registry address
 //!
 //! ## See also
 //! - `types.rs` — Data structures (Dispute, DisputeStatus, Ruling, RelayChainProof)
@@ -28,7 +28,10 @@
 
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String};
+use soroban_sdk::{
+    contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, IntoVal, String,
+    Symbol,
+};
 
 pub mod errors;
 pub mod storage;
@@ -38,6 +41,18 @@ use crate::errors::ContractError;
 use crate::types::{
     AdminCouncil, Dispute, DisputeStatus, OptionalRelayChainProof, RelayChainProof, Ruling,
 };
+
+fn require_not_paused(env: &Env) {
+    let pause_addr = storage::get_pause_contract_address(env);
+    let is_paused: bool = env.invoke_contract(
+        &pause_addr,
+        &soroban_sdk::Symbol::new(env, "is_paused"),
+        soroban_sdk::Vec::new(env),
+    );
+    if is_paused {
+        panic_with_error!(env, ContractError::ProtocolPaused);
+    }
+}
 
 #[contract]
 pub struct DisputeResolverContract;
@@ -50,6 +65,7 @@ impl DisputeResolverContract {
     /// # Parameters
     /// - `env`: Soroban environment for the current contract invocation.
     /// - `initiator`: Address of the party raising the dispute. Must authorize this call.
+    /// - `respondent`: Address of the designated respondent for the dispute.
     /// - `tx_id`: The 32-byte Stellar transaction ID under dispute.
     /// - `proof`: The initiator's cryptographic relay chain proof.
     ///
@@ -58,6 +74,7 @@ impl DisputeResolverContract {
     ///
     /// # Errors
     /// - `ContractError::DuplicateDispute` if a dispute for this `tx_id` already exists.
+    /// - `ContractError::NodeNotActive` if either participant is not active.
     pub fn raise_dispute(
         env: Env,
         initiator: Address,
@@ -66,6 +83,7 @@ impl DisputeResolverContract {
         proof: RelayChainProof,
     ) -> Result<u64, ContractError> {
         storage::extend_instance_ttl(&env);
+        require_not_paused(&env);
         initiator.require_auth();
 
         if initiator == respondent {
@@ -76,6 +94,10 @@ impl DisputeResolverContract {
         if storage::get_dispute_by_tx(&env, &tx_id).is_some() {
             return Err(ContractError::DuplicateDispute);
         }
+
+        // Validate that both parties are currently active in the relay registry.
+        Self::require_active_node(&env, &initiator)?;
+        Self::require_active_node(&env, &respondent)?;
 
         // Auto-increment and get the next dispute ID (starts at 1).
         let dispute_id = storage::get_next_dispute_id(&env);
@@ -131,10 +153,14 @@ impl DisputeResolverContract {
         proof: RelayChainProof,
     ) -> Result<(), ContractError> {
         storage::extend_instance_ttl(&env);
+        require_not_paused(&env);
         respondent.require_auth();
 
         let mut dispute =
             storage::get_dispute(&env, dispute_id).ok_or(ContractError::DisputeNotFound)?;
+
+        // Validate that the respondent is still active in the relay registry.
+        Self::require_active_node(&env, &respondent)?;
 
         if dispute.respondent != respondent {
             return Err(ContractError::UnauthorizedRespondent);
@@ -185,6 +211,7 @@ impl DisputeResolverContract {
     /// - `ContractError::NotResponded` if the dispute status is unexpected.
     pub fn resolve(env: Env, dispute_id: u64) -> Result<Ruling, ContractError> {
         storage::extend_instance_ttl(&env);
+        require_not_paused(&env);
         let mut dispute =
             storage::get_dispute(&env, dispute_id).ok_or(ContractError::DisputeNotFound)?;
 
@@ -332,6 +359,20 @@ impl DisputeResolverContract {
         true
     }
 
+    fn require_active_node(env: &Env, node: &Address) -> Result<(), ContractError> {
+        let registry_address = storage::get_registry_address(env);
+        let active: bool = env.invoke_contract(
+            &registry_address,
+            &Symbol::new(env, "is_active"),
+            soroban_sdk::vec![&env, node.clone().into_val(env)],
+        );
+        if active {
+            Ok(())
+        } else {
+            Err(ContractError::NodeNotActive)
+        }
+    }
+
     /// Fetch the full dispute record by its ID.
     ///
     /// # Parameters
@@ -381,7 +422,9 @@ impl DisputeResolverContract {
     pub fn initialize(
         env: Env,
         council: AdminCouncil,
+        registry: Address,
         resolution_window: u32,
+        pause_contract_address: Address,
     ) -> Result<(), ContractError> {
         storage::extend_instance_ttl(&env);
         if storage::has_admin_council(&env) {
@@ -397,7 +440,9 @@ impl DisputeResolverContract {
         }
 
         storage::set_admin_council(&env, &council);
+        storage::set_registry_address(&env, &registry);
         storage::set_resolution_window(&env, resolution_window);
+        storage::set_pause_contract_address(&env, &pause_contract_address);
 
         Ok(())
     }

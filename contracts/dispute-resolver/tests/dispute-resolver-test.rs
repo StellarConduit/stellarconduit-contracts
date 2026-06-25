@@ -6,15 +6,44 @@ use dispute_resolver::{
     DisputeResolverContract, DisputeResolverContractClient,
 };
 use soroban_sdk::{
+    contract, contractimpl,
     testutils::{Address as _, Ledger},
     Address, BytesN, Env,
 };
 
-fn setup<'a>() -> (Env, DisputeResolverContractClient<'a>, Address) {
+fn make_pause(env: &Env, admin: &Address) -> Address {
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut m = soroban_sdk::Vec::new(env);
+    m.push_back(admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(env, &pause_id).initialize(
+        &emergency_pause::types::AdminCouncil { members: m, threshold: 1 },
+    );
+    pause_id
+}
+
+#[contract]
+pub struct MockRelayRegistryContract;
+
+#[contractimpl]
+impl MockRelayRegistryContract {
+    pub fn set_active(env: Env, address: Address, active: bool) {
+        env.storage().persistent().set(&address, &active);
+    }
+
+    pub fn is_active(env: Env, address: Address) -> bool {
+        env.storage()
+            .persistent()
+            .get::<_, bool>(&address)
+            .unwrap_or(false)
+    }
+}
+
+fn setup<'a>() -> (Env, DisputeResolverContractClient<'a>, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register(DisputeResolverContract, ());
     let client = DisputeResolverContractClient::new(&env, &contract_id);
+    let registry_id = env.register(MockRelayRegistryContract, ());
     let admin = Address::generate(&env);
     let mut members = soroban_sdk::Vec::new(&env);
     members.push_back(admin.clone());
@@ -22,8 +51,18 @@ fn setup<'a>() -> (Env, DisputeResolverContractClient<'a>, Address) {
         members,
         threshold: 1,
     };
-    client.initialize(&council, &100u32); // 100 ledger resolution window
-    (env, client, admin)
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let pause_council = emergency_pause::types::AdminCouncil {
+        members: {
+            let mut m = soroban_sdk::Vec::new(&env);
+            m.push_back(admin.clone());
+            m
+        },
+        threshold: 1,
+    };
+    emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id).initialize(&pause_council);
+   client.initialize(&council, &registry_id, &100u32, &pause_id); // 100 ledger resolution window
+    (env, client, admin, registry_id)
 }
 
 fn create_proof(
@@ -48,14 +87,19 @@ fn create_proof(
 fn setup_disputants(
     env: &Env,
     client: &DisputeResolverContractClient,
+    registry: &Address,
 ) -> (
     Address,
     Address,
     ed25519_dalek::SigningKey,
     ed25519_dalek::SigningKey,
 ) {
+    let registry_client = MockRelayRegistryContractClient::new(env, registry);
     let initiator = Address::generate(env);
     let respondent = Address::generate(env);
+
+    registry_client.set_active(&initiator, &true);
+    registry_client.set_active(&respondent, &true);
 
     let initiator_sk = ed25519_dalek::SigningKey::from_bytes(&[1u8; 32]);
     let initiator_pk_bytes: [u8; 32] = initiator_sk.verifying_key().to_bytes();
@@ -78,6 +122,7 @@ fn setup_disputants(
 #[test]
 fn test_initialize_success() {
     let env = Env::default();
+    env.mock_all_auths();
     let contract_id = env.register(DisputeResolverContract, ());
     let client = DisputeResolverContractClient::new(&env, &contract_id);
 
@@ -88,8 +133,10 @@ fn test_initialize_success() {
         members,
         threshold: 1,
     };
+    let pause_id = make_pause(&env, &admin);
 
-    client.initialize(&council, &100u32);
+    let registry_id = env.register(MockRelayRegistryContract, ());
+   client.initialize(&council, &registry_id, &100u32, &pause_id);
 
     let active_window = env.as_contract(&client.address, || storage::get_resolution_window(&env));
     assert_eq!(active_window, 100);
@@ -98,7 +145,7 @@ fn test_initialize_success() {
 #[test]
 #[should_panic(expected = "Error(Contract, #14)")] // AlreadyInitialized
 fn test_initialize_already_initialized() {
-    let (env, client, admin) = setup();
+    let (env, client, admin, registry) = setup();
 
     let mut members = soroban_sdk::Vec::new(&env);
     members.push_back(admin.clone());
@@ -106,15 +153,16 @@ fn test_initialize_already_initialized() {
         members,
         threshold: 1,
     };
-    client.initialize(&council, &200u32);
+    let pause_id = make_pause(&env, &admin);
+   client.initialize(&council, &registry, &200u32, &pause_id);
 }
 
 // ── raise_dispute() tests ─────────────────────────────────────────────────────
 
 #[test]
 fn test_raise_dispute_success() {
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client);
+    let (env, client, _, registry) = setup();
+    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client, &registry);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -131,8 +179,8 @@ fn test_raise_dispute_success() {
 
 #[test]
 fn test_raise_dispute_auto_increment_id() {
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client);
+    let (env, client, _, registry) = setup();
+    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client, &registry);
 
     let tx_id1 = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -151,8 +199,8 @@ fn test_raise_dispute_auto_increment_id() {
 #[test]
 #[should_panic(expected = "Error(Contract, #8)")] // DuplicateDispute
 fn test_raise_dispute_duplicate_tx_id() {
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client);
+    let (env, client, _, registry) = setup();
+    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client, &registry);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -167,36 +215,71 @@ fn test_raise_dispute_duplicate_tx_id() {
 #[test]
 #[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn test_raise_dispute_auth_required() {
-    let env = Env::default();
-    // Do not call mock_all_auths()
-    let contract_id = env.register(DisputeResolverContract, ());
-    let client = DisputeResolverContractClient::new(&env, &contract_id);
-
-    let admin = Address::generate(&env);
-    let mut members = soroban_sdk::Vec::new(&env);
-    members.push_back(admin.clone());
-    let council = AdminCouncil {
-        members,
+    let env2 = Env::default();
+    let registry_id = env2.register(MockRelayRegistryContract, ());
+    let contract_id2 = env2.register(DisputeResolverContract, ());
+    let client2 = DisputeResolverContractClient::new(&env2, &contract_id2);
+    let admin2 = Address::generate(&env2);
+    let mut members2 = soroban_sdk::Vec::new(&env2);
+    members2.push_back(admin2.clone());
+    let council2 = AdminCouncil {
+        members: members2,
         threshold: 1,
     };
-    client.initialize(&council, &100u32);
 
-    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client);
+    env2.mock_all_auths();
+    let pause_id2 = make_pause(&env2, &admin2);
+    client2.initialize(&council2, &registry_id, &100u32, &pause_id2);
+    env2.set_auths(&[]);
+
+    let (initiator, respondent, init_sk, _) = setup_disputants(&env2, &client2, &registry_id);
+
+    let tx_id = BytesN::from_array(&env2, &[9u8; 32]);
+    let chain_hash = [8u8; 32];
+    let init_proof = create_proof(&env2, &init_sk, &chain_hash, 10);
+
+    client2.raise_dispute(&initiator, &respondent, &tx_id, &init_proof);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #15)")]
+fn test_raise_dispute_inactive_initiator() {
+    let (env, client, _, registry) = setup();
+    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client, &registry);
+    let registry_client = MockRelayRegistryContractClient::new(&env, &registry);
+    registry_client.set_active(&initiator, &false);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
     let init_proof = create_proof(&env, &init_sk, &chain_hash, 10);
 
-    // Will panic because require_auth() is not mocked
     client.raise_dispute(&initiator, &respondent, &tx_id, &init_proof);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #15)")]
+fn test_respond_inactive_respondent() {
+    let (env, client, _, registry) = setup();
+    let (initiator, respondent, init_sk, resp_sk) = setup_disputants(&env, &client, &registry);
+
+    let tx_id = BytesN::from_array(&env, &[9u8; 32]);
+    let chain_hash = [8u8; 32];
+    let init_proof = create_proof(&env, &init_sk, &chain_hash, 10);
+    let dispute_id = client.raise_dispute(&initiator, &respondent, &tx_id, &init_proof);
+
+    let registry_client = MockRelayRegistryContractClient::new(&env, &registry);
+    registry_client.set_active(&respondent, &false);
+
+    let resp_proof = create_proof(&env, &resp_sk, &chain_hash, 15);
+    client.respond(&respondent, &dispute_id, &resp_proof);
 }
 
 // ── respond() tests ───────────────────────────────────────────────────────────
 
 #[test]
 fn test_respond_success() {
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, resp_sk) = setup_disputants(&env, &client);
+    let (env, client, _, registry) = setup();
+    let (initiator, respondent, init_sk, resp_sk) = setup_disputants(&env, &client, &registry);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -218,8 +301,8 @@ fn test_respond_success() {
 #[test]
 #[should_panic(expected = "Error(Contract, #10)")] // NotOpen
 fn test_respond_not_open() {
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, resp_sk) = setup_disputants(&env, &client);
+    let (env, client, _, registry) = setup();
+    let (initiator, respondent, init_sk, resp_sk) = setup_disputants(&env, &client, &registry);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -237,8 +320,8 @@ fn test_respond_not_open() {
 #[test]
 #[should_panic(expected = "Error(Contract, #11)")] // ResolutionWindowExpired
 fn test_respond_window_expired() {
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, resp_sk) = setup_disputants(&env, &client);
+    let (env, client, _, registry) = setup();
+    let (initiator, respondent, init_sk, resp_sk) = setup_disputants(&env, &client, &registry);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -256,8 +339,8 @@ fn test_respond_window_expired() {
 #[test]
 #[should_panic(expected = "Error(Contract, #1)")] // DisputeNotFound
 fn test_respond_dispute_not_found() {
-    let (env, client, _) = setup();
-    let (_, respondent, _, resp_sk) = setup_disputants(&env, &client);
+    let (env, client, _, registry) = setup();
+    let (_, respondent, _, resp_sk) = setup_disputants(&env, &client, &registry);
 
     let chain_hash = [8u8; 32];
     let resp_proof = create_proof(&env, &resp_sk, &chain_hash, 15);
@@ -269,8 +352,8 @@ fn test_respond_dispute_not_found() {
 
 #[test]
 fn test_resolve_initiator_wins_lower_sequence() {
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, resp_sk) = setup_disputants(&env, &client);
+    let (env, client, _, registry) = setup();
+    let (initiator, respondent, init_sk, resp_sk) = setup_disputants(&env, &client, &registry);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -290,8 +373,8 @@ fn test_resolve_initiator_wins_lower_sequence() {
 
 #[test]
 fn test_resolve_respondent_wins_lower_sequence() {
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, resp_sk) = setup_disputants(&env, &client);
+    let (env, client, _, registry) = setup();
+    let (initiator, respondent, init_sk, resp_sk) = setup_disputants(&env, &client, &registry);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -311,8 +394,8 @@ fn test_resolve_respondent_wins_lower_sequence() {
 
 #[test]
 fn test_resolve_tie_initiator_wins() {
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, resp_sk) = setup_disputants(&env, &client);
+    let (env, client, _, registry) = setup();
+    let (initiator, respondent, init_sk, resp_sk) = setup_disputants(&env, &client, &registry);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -330,8 +413,8 @@ fn test_resolve_tie_initiator_wins() {
 
 #[test]
 fn test_resolve_no_response_expired() {
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client);
+    let (env, client, _, registry) = setup();
+    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client, &registry);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -350,11 +433,12 @@ fn test_resolve_no_response_expired() {
 #[test]
 #[should_panic(expected = "Error(Contract, #16)")] // UnauthorizedRespondent
 fn test_respond_unauthorized_respondent() {
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client);
+    let (env, client, _, registry) = setup();
+    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client, &registry);
 
-    // Create a third party
+    // Create a third party and mark them active so we hit UnauthorizedRespondent, not NodeNotActive
     let unauthorized = Address::generate(&env);
+    MockRelayRegistryContractClient::new(&env, &registry).set_active(&unauthorized, &true);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -371,8 +455,8 @@ fn test_respond_unauthorized_respondent() {
 #[test]
 #[should_panic(expected = "Error(Contract, #2)")] // DisputeAlreadyResolved
 fn test_resolve_already_resolved() {
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, resp_sk) = setup_disputants(&env, &client);
+    let (env, client, _, registry) = setup();
+    let (initiator, respondent, init_sk, resp_sk) = setup_disputants(&env, &client, &registry);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -390,8 +474,8 @@ fn test_resolve_already_resolved() {
 #[test]
 #[should_panic(expected = "Error(Contract, #12)")] // ResolutionWindowActive
 fn test_resolve_window_still_active() {
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client);
+    let (env, client, _, registry) = setup();
+    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client, &registry);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -407,8 +491,8 @@ fn test_resolve_window_still_active() {
 
 #[test]
 fn test_get_dispute_found() {
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client);
+    let (env, client, _, registry) = setup();
+    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client, &registry);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -424,14 +508,14 @@ fn test_get_dispute_found() {
 #[test]
 #[should_panic(expected = "Error(Contract, #1)")] // DisputeNotFound
 fn test_get_dispute_not_found() {
-    let (_env, client, _) = setup();
+    let (_env, client, _, _) = setup();
     client.get_dispute(&888);
 }
 
 #[test]
 fn test_get_ruling_after_resolve() {
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client);
+    let (env, client, _, registry) = setup();
+    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client, &registry);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
@@ -451,8 +535,8 @@ fn test_get_ruling_after_resolve() {
 #[test]
 #[should_panic(expected = "Error(Contract, #1)")] // DisputeNotFound
 fn test_get_ruling_not_yet_resolved() {
-    let (env, client, _) = setup();
-    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client);
+    let (env, client, _, registry) = setup();
+    let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client, &registry);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
