@@ -43,9 +43,12 @@ pub enum DataKey {
     Ruling(u64),
     ResolutionWindow,
     AdminCouncil,
+    RegistryAddress,
     TxDispute(BytesN<32>),
     /// Stores the raw 32-byte Ed25519 public key for an Address.
     PublicKey(Address),
+    /// Stores the emergency pause contract address.
+    PauseContractAddress,
 }
 
 /// Load a dispute by its ID. Returns None if not found.
@@ -128,6 +131,21 @@ pub fn has_admin_council(env: &Env) -> bool {
     env.storage().instance().has(&DataKey::AdminCouncil)
 }
 
+/// Get the registry contract address.
+pub fn get_registry_address(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&DataKey::RegistryAddress)
+        .unwrap()
+}
+
+/// Set the registry contract address.
+pub fn set_registry_address(env: &Env, address: &Address) {
+    env.storage()
+        .instance()
+        .set(&DataKey::RegistryAddress, address);
+}
+
 /// Get the admin council.
 pub fn get_admin_council(env: &Env) -> crate::types::AdminCouncil {
     env.storage()
@@ -191,4 +209,19 @@ pub fn set_public_key(env: &Env, address: &Address, public_key: &BytesN<32>) {
     env.storage()
         .persistent()
         .extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
+}
+
+/// Load the emergency pause contract address.
+pub fn get_pause_contract_address(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&DataKey::PauseContractAddress)
+        .expect("pause contract address not initialized")
+}
+
+/// Set the emergency pause contract address.
+pub fn set_pause_contract_address(env: &Env, address: &Address) {
+    env.storage()
+        .instance()
+        .set(&DataKey::PauseContractAddress, address);
 }

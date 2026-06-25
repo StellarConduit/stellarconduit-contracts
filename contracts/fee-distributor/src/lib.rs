@@ -27,7 +27,7 @@
 
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, token, Address, Env, IntoVal};
+use soroban_sdk::{contract, contractimpl, panic_with_error, token, Address, Env, IntoVal};
 
 pub mod errors;
 pub mod storage;
@@ -38,6 +38,18 @@ mod test;
 
 use crate::errors::ContractError;
 use crate::types::AdminCouncil;
+
+fn require_not_paused(env: &Env) {
+    let pause_addr = storage::get_pause_contract_address(env);
+    let is_paused: bool = env.invoke_contract(
+        &pause_addr,
+        &soroban_sdk::Symbol::new(env, "is_paused"),
+        soroban_sdk::Vec::new(env),
+    );
+    if is_paused {
+        panic_with_error!(env, ContractError::ProtocolPaused);
+    }
+}
 
 fn require_council_auth(_env: &Env, council: &AdminCouncil) {
     let mut authorized = 0u32;
@@ -82,6 +94,7 @@ impl FeeDistributorContract {
         treasury_share_bps: u32,
         treasury: Address,
         token: Address,
+        pause_contract_address: Address,
     ) -> Result<(), ContractError> {
         storage::extend_instance_ttl(&env);
         // Guard against re-initialization
@@ -111,6 +124,7 @@ impl FeeDistributorContract {
         storage::set_fee_config(&env, &config);
         storage::set_treasury_address(&env, &treasury);
         storage::set_token_address(&env, &token);
+        storage::set_pause_contract_address(&env, &pause_contract_address);
 
         Ok(())
     }
@@ -178,6 +192,7 @@ impl FeeDistributorContract {
         batch_size: u32,
     ) -> Result<(), ContractError> {
         storage::extend_instance_ttl(&env);
+        require_not_paused(&env);
         if storage::get_fee_entry(&env, batch_id).is_some() {
             return Err(ContractError::BatchAlreadyDistributed);
         }
@@ -274,6 +289,7 @@ impl FeeDistributorContract {
     /// - `ContractError::Overflow` if the arithmetic for updating `total_claimed` overflows.
     pub fn claim(env: Env, relay_address: Address) -> Result<i128, ContractError> {
         storage::extend_instance_ttl(&env);
+        require_not_paused(&env);
         relay_address.require_auth();
 
         let mut record = storage::get_earnings(&env, &relay_address);

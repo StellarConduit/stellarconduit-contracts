@@ -3,6 +3,20 @@
 use soroban_sdk::{testutils::Address as _, token, Address, Env, String};
 use treasury::{types::SpendingProgram, TreasuryContract, TreasuryContractClient};
 
+fn make_pause(env: &Env) -> Address {
+    let admin = Address::generate(env);
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut members = soroban_sdk::Vec::new(env);
+    members.push_back(admin);
+    emergency_pause::EmergencyPauseContractClient::new(env, &pause_id).initialize(
+        &emergency_pause::types::AdminCouncil {
+            members,
+            threshold: 1,
+        },
+    );
+    pause_id
+}
+
 /// Sets up the test environment with a mocked SAC token contract.
 fn setup<'a>() -> (
     Env,
@@ -31,7 +45,7 @@ fn setup<'a>() -> (
     let token_client = token::StellarAssetClient::new(&env, &token_address.address());
 
     // Initialize the treasury
-    client.initialize(&council, &token_address.address());
+    client.initialize(&council, &token_address.address(), &make_pause(&env));
 
     (env, client, admin, token_address.address(), token_client)
 }
@@ -44,6 +58,7 @@ fn create_spending_program(
     client: &TreasuryContractClient,
     program_id: u64,
     budget: i128,
+    recipient_address: Address,
 ) {
     let program = SpendingProgram {
         program_id,
@@ -51,6 +66,7 @@ fn create_spending_program(
         spent: 0,
         active: true,
         name: String::from_str(env, "Test Program"),
+        recipient_address, // 👈 FIX: Core assignment updated
     };
 
     env.as_contract(&client.address, || {
@@ -74,7 +90,7 @@ fn test_initialize_success() {
     };
     let token = Address::generate(&env);
 
-    client.initialize(&council, &token);
+    client.initialize(&council, &token, &make_pause(&env));
 
     // Verify balance is initialized to 0
     assert_eq!(client.get_balance(), 0);
@@ -96,10 +112,10 @@ fn test_initialize_already_initialized() {
     let token = Address::generate(&env);
 
     // First call succeeds
-    client.initialize(&council, &token);
+    client.initialize(&council, &token, &make_pause(&env));
 
     // Second call should panic with AlreadyInitialized
-    client.initialize(&council, &token);
+    client.initialize(&council, &token, &make_pause(&env));
 }
 
 // ── deposit() tests ───────────────────────────────────────────────────────────
@@ -170,7 +186,7 @@ fn test_deposit_auth_required() {
     let token_admin = Address::generate(&env);
     let token_address = env.register_stellar_asset_contract_v2(token_admin.clone());
 
-    client.initialize(&council, &token_address.address());
+    client.initialize(&council, &token_address.address(), &make_pause(&env));
 
     let user = Address::generate(&env);
     // This will panic because require_auth is called on `user` but we didn't mock/provide it
@@ -237,7 +253,7 @@ fn test_withdraw_unauthorized() {
     let token_admin = Address::generate(&env);
     let token_address = env.register_stellar_asset_contract_v2(token_admin.clone());
 
-    client.initialize(&council, &token_address.address());
+    client.initialize(&council, &token_address.address(), &make_pause(&env));
 
     let recipient = Address::generate(&env);
     // Fails because admin.require_auth() is called, but auth is not mocked
@@ -248,21 +264,27 @@ fn test_withdraw_unauthorized() {
 
 #[test]
 fn test_allocate_success() {
-    let (env, client, _admin, _token_id, token_client) = setup();
+    let (env, client, _admin, token_id, token_client) = setup();
     let user = Address::generate(&env);
+    let recipient = Address::generate(&env);
 
     // Deposit 10,000
     token_client.mint(&user, &10_000);
     client.deposit(&user, &10_000);
 
-    // Create spending program 1 with budget 5000
-    create_spending_program(&env, &client, 1, 5_000);
+    // Create spending program 1 with budget 5000 and target recipient address
+    create_spending_program(&env, &client, 1, 5_000, recipient.clone());
 
     // Allocate 2000
     client.allocate(&1, &2_000);
 
     assert_eq!(client.get_balance(), 8_000);
-    // In actual contract, allocate() increments spent
+
+    // Verify physical on-chain SAC token distribution occurred cleanly
+    let token = token::Client::new(&env, &token_id);
+    assert_eq!(token.balance(&recipient), 2_000);
+    assert_eq!(token.balance(&client.address), 8_000);
+
     let program = env.as_contract(&client.address, || {
         treasury::storage::get_spending_program(&env, 1).unwrap()
     });
@@ -287,17 +309,19 @@ fn test_allocate_program_not_found() {
 fn test_allocate_program_inactive() {
     let (env, client, _admin, _token_id, token_client) = setup();
     let user = Address::generate(&env);
+    let recipient = Address::generate(&env);
 
     token_client.mint(&user, &10_000);
     client.deposit(&user, &10_000);
 
-    // Create inactive program
+    // Create inactive program with missing fields satisfied
     let program = treasury::types::SpendingProgram {
         program_id: 1,
         budget: 5_000,
         spent: 0,
         active: false,
         name: String::from_str(&env, "Inactive"),
+        recipient_address: recipient,
     };
     env.as_contract(&client.address, || {
         treasury::storage::set_spending_program(&env, 1, program);
@@ -311,12 +335,13 @@ fn test_allocate_program_inactive() {
 fn test_allocate_over_budget() {
     let (env, client, _admin, _token_id, token_client) = setup();
     let user = Address::generate(&env);
+    let recipient = Address::generate(&env);
 
     token_client.mint(&user, &10_000);
     client.deposit(&user, &10_000);
 
     // Create program with budget 5_000
-    create_spending_program(&env, &client, 1, 5_000);
+    create_spending_program(&env, &client, 1, 5_000, recipient);
 
     // Try to allocate 6_000
     client.allocate(&1, &6_000);
@@ -327,13 +352,14 @@ fn test_allocate_over_budget() {
 fn test_allocate_insufficient_treasury_balance() {
     let (env, client, _admin, _token_id, token_client) = setup();
     let user = Address::generate(&env);
+    let recipient = Address::generate(&env);
 
     // Deposit only 2,000
     token_client.mint(&user, &2_000);
     client.deposit(&user, &2_000);
 
     // Create program with budget 5_000
-    create_spending_program(&env, &client, 1, 5_000);
+    create_spending_program(&env, &client, 1, 5_000, recipient);
 
     // Try to allocate 3_000 (below budget, but exceeds treasury balance)
     client.allocate(&1, &3_000);
@@ -355,7 +381,7 @@ fn test_allocate_unauthorized() {
     let token_admin = Address::generate(&env);
     let token_address = env.register_stellar_asset_contract_v2(token_admin.clone());
 
-    client.initialize(&council, &token_address.address());
+    client.initialize(&council, &token_address.address(), &make_pause(&env));
 
     // Fails because admin.require_auth() is called, but auth is not mocked
     client.allocate(&1, &100);

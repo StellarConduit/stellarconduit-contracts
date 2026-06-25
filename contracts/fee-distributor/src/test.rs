@@ -23,7 +23,12 @@ fn setup<'a>() -> (Env, FeeDistributorContractClient<'a>) {
     };
     let treasury = Address::generate(&env);
     let token = Address::generate(&env);
-    client.initialize(&council, &50u32, &1000u32, &treasury, &token);
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut pm = soroban_sdk::Vec::new(&env);
+    pm.push_back(admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id)
+        .initialize(&emergency_pause::types::AdminCouncil { members: pm, threshold: 1 });
+    client.initialize(&council, &50u32, &1000u32, &treasury, &token, &pause_id);
     (env, client)
 }
 
@@ -40,15 +45,25 @@ fn setup_with_token<'a>() -> (Env, FeeDistributorContractClient<'a>, Address) {
     let treasury_id = env.register(treasury::TreasuryContract, ());
     let treasury_client = treasury::TreasuryContractClient::new(&env, &treasury_id);
 
-    // Initialize treasury
+    // Register pause contract
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+
     let admin = Address::generate(&env);
     let mut members = soroban_sdk::Vec::new(&env);
     members.push_back(admin.clone());
+
+    // Initialize pause
+    let mut pm = soroban_sdk::Vec::new(&env);
+    pm.push_back(admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id)
+        .initialize(&emergency_pause::types::AdminCouncil { members: pm, threshold: 1 });
+
+    // Initialize treasury
     let treasury_council = treasury::types::AdminCouncil {
         members: members.clone(),
         threshold: 1,
     };
-    treasury_client.initialize(&treasury_council, &token_id);
+    treasury_client.initialize(&treasury_council, &token_id, &pause_id);
 
     // Register fee distributor
     let contract_id = env.register(FeeDistributorContract, ());
@@ -60,7 +75,7 @@ fn setup_with_token<'a>() -> (Env, FeeDistributorContractClient<'a>, Address) {
     };
 
     // Initialize fee distributor
-    client.initialize(&council, &50u32, &1000u32, &treasury_id, &token_id);
+    client.initialize(&council, &50u32, &1000u32, &treasury_id, &token_id, &pause_id);
 
     // Mint tokens to fee distributor for testing
     let token_client = token::StellarAssetClient::new(&env, &token_id);
@@ -89,7 +104,12 @@ fn test_initialize_success() {
     let treasury = Address::generate(&env);
     let token = Address::generate(&env);
 
-    client.initialize(&council, &50u32, &1000u32, &treasury, &token);
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut pm = soroban_sdk::Vec::new(&env);
+    pm.push_back(admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id)
+        .initialize(&emergency_pause::types::AdminCouncil { members: pm, threshold: 1 });
+    client.initialize(&council, &50u32, &1000u32, &treasury, &token, &pause_id);
 
     // Verify fee config is set correctly by calling calculate_fee
     // With fee_rate_bps = 50 and batch_size = 200, fee should be 1
@@ -112,11 +132,16 @@ fn test_initialize_already_initialized() {
     };
     let treasury = Address::generate(&env);
     let token = Address::generate(&env);
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut pm = soroban_sdk::Vec::new(&env);
+    pm.push_back(admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id)
+        .initialize(&emergency_pause::types::AdminCouncil { members: pm, threshold: 1 });
 
-    client.initialize(&council, &50u32, &1000u32, &treasury, &token);
+    client.initialize(&council, &50u32, &1000u32, &treasury, &token, &pause_id);
 
     // Second call should fail
-    let result = client.try_initialize(&council, &50u32, &1000u32, &treasury, &token);
+    let result = client.try_initialize(&council, &50u32, &1000u32, &treasury, &token, &pause_id);
     assert_eq!(result, Err(Ok(ContractError::AlreadyInitialized)));
 }
 
@@ -410,7 +435,12 @@ fn test_set_fee_rate_success() {
     let treasury = Address::generate(&env);
     let token = Address::generate(&env);
 
-    client.initialize(&council, &50u32, &1000u32, &treasury, &token);
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut pm = soroban_sdk::Vec::new(&env);
+    pm.push_back(admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id)
+        .initialize(&emergency_pause::types::AdminCouncil { members: pm, threshold: 1 });
+    client.initialize(&council, &50u32, &1000u32, &treasury, &token, &pause_id);
 
     // Update fee rate to 100 bps (1%)
     client.set_fee_rate(&100u32);
@@ -437,7 +467,12 @@ fn test_set_fee_rate_invalid_zero() {
     let treasury = Address::generate(&env);
     let token = Address::generate(&env);
 
-    client.initialize(&council, &50u32, &1000u32, &treasury, &token);
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut pm = soroban_sdk::Vec::new(&env);
+    pm.push_back(admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id)
+        .initialize(&emergency_pause::types::AdminCouncil { members: pm, threshold: 1 });
+    client.initialize(&council, &50u32, &1000u32, &treasury, &token, &pause_id);
 
     // Try to set fee rate to 0
     let result = client.try_set_fee_rate(&0u32);
@@ -460,7 +495,12 @@ fn test_set_fee_rate_invalid_above_max() {
     let treasury = Address::generate(&env);
     let token = Address::generate(&env);
 
-    client.initialize(&council, &50u32, &1000u32, &treasury, &token);
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut pm = soroban_sdk::Vec::new(&env);
+    pm.push_back(admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id)
+        .initialize(&emergency_pause::types::AdminCouncil { members: pm, threshold: 1 });
+    client.initialize(&council, &50u32, &1000u32, &treasury, &token, &pause_id);
 
     // Try to set fee rate to 10001 (above max of 10000)
     let result = client.try_set_fee_rate(&10001u32);
@@ -484,7 +524,12 @@ fn test_set_fee_rate_unauthorized() {
     let treasury = Address::generate(&env);
     let token = Address::generate(&env);
 
-    client.initialize(&council, &50u32, &1000u32, &treasury, &token);
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut pm = soroban_sdk::Vec::new(&env);
+    pm.push_back(admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id)
+        .initialize(&emergency_pause::types::AdminCouncil { members: pm, threshold: 1 });
+    client.initialize(&council, &50u32, &1000u32, &treasury, &token, &pause_id);
 
     // Create a new env without mock_all_auths and try to call as non-admin
     let env2 = Env::default();
@@ -603,8 +648,13 @@ fn test_calculate_fee_with_different_rates() {
     let treasury = Address::generate(&env);
     let token = Address::generate(&env);
 
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut pm = soroban_sdk::Vec::new(&env);
+    pm.push_back(admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id)
+        .initialize(&emergency_pause::types::AdminCouncil { members: pm, threshold: 1 });
     // Initialize with fee_rate_bps = 100 (1%)
-    client.initialize(&council, &100u32, &1000u32, &treasury, &token);
+    client.initialize(&council, &100u32, &1000u32, &treasury, &token, &pause_id);
 
     // With batch_size = 200: fee = 200 * 100 / 10000 = 2
     let fee = client.calculate_fee(&200u32);
@@ -707,7 +757,12 @@ fn test_fee_rate_change_affects_future_distributions() {
     let token = Address::generate(&env);
     let relay = Address::generate(&env);
 
-    client.initialize(&council, &50u32, &1000u32, &treasury, &token);
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut pm = soroban_sdk::Vec::new(&env);
+    pm.push_back(admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id)
+        .initialize(&emergency_pause::types::AdminCouncil { members: pm, threshold: 1 });
+    client.initialize(&council, &50u32, &1000u32, &treasury, &token, &pause_id);
 
     // Distribute with initial rate
     client.distribute(&relay, &1u64, &200u32); // fee = 1
@@ -749,7 +804,12 @@ fn test_treasury_share_calculation_edge_cases() {
         members: members.clone(),
         threshold: 1,
     };
-    treasury_client.initialize(&treasury_council, &token_id);
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut pm = soroban_sdk::Vec::new(&env);
+    pm.push_back(admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id)
+        .initialize(&emergency_pause::types::AdminCouncil { members: pm, threshold: 1 });
+    treasury_client.initialize(&treasury_council, &token_id, &pause_id);
 
     let council = crate::types::AdminCouncil {
         members,
@@ -758,7 +818,7 @@ fn test_treasury_share_calculation_edge_cases() {
     let relay = Address::generate(&env);
 
     // Initialize with 50% treasury share
-    client.initialize(&council, &100u32, &5000u32, &treasury_id, &token_id);
+    client.initialize(&council, &100u32, &5000u32, &treasury_id, &token_id, &pause_id);
 
     // Mint tokens to fee distributor
     let token_client = token::StellarAssetClient::new(&env, &token_id);
@@ -827,7 +887,12 @@ fn test_set_fee_rate_boundary_values() {
     let treasury = Address::generate(&env);
     let token = Address::generate(&env);
 
-    client.initialize(&council, &100u32, &1000u32, &treasury, &token);
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut pm = soroban_sdk::Vec::new(&env);
+    pm.push_back(admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id)
+        .initialize(&emergency_pause::types::AdminCouncil { members: pm, threshold: 1 });
+    client.initialize(&council, &100u32, &1000u32, &treasury, &token, &pause_id);
 
     // Test minimum valid rate (1)
     client.set_fee_rate(&1u32);
@@ -857,8 +922,13 @@ fn test_distribute_with_zero_treasury_share() {
     let token = Address::generate(&env);
     let relay = Address::generate(&env);
 
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut pm = soroban_sdk::Vec::new(&env);
+    pm.push_back(admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id)
+        .initialize(&emergency_pause::types::AdminCouncil { members: pm, threshold: 1 });
     // Initialize with 0% treasury share
-    client.initialize(&council, &100u32, &0u32, &treasury, &token);
+    client.initialize(&council, &100u32, &0u32, &treasury, &token, &pause_id);
 
     client.distribute(&relay, &1u64, &1000u32);
     // fee = 1000 * 100 / 10000 = 10
@@ -890,12 +960,17 @@ fn test_distribute_with_max_treasury_share() {
     let mut members = soroban_sdk::Vec::new(&env);
     members.push_back(council_admin.clone());
 
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut pm = soroban_sdk::Vec::new(&env);
+    pm.push_back(council_admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id)
+        .initialize(&emergency_pause::types::AdminCouncil { members: pm, threshold: 1 });
     // Initialize treasury
     let treasury_council = treasury::types::AdminCouncil {
         members: members.clone(),
         threshold: 1,
     };
-    treasury_client.initialize(&treasury_council, &token_id);
+    treasury_client.initialize(&treasury_council, &token_id, &pause_id);
 
     let council = crate::types::AdminCouncil {
         members,
@@ -904,7 +979,7 @@ fn test_distribute_with_max_treasury_share() {
     let relay = Address::generate(&env);
 
     // Initialize with 100% treasury share
-    client.initialize(&council, &100u32, &10000u32, &treasury_id, &token_id);
+    client.initialize(&council, &100u32, &10000u32, &treasury_id, &token_id, &pause_id);
 
     // Mint tokens to fee distributor
     let token_client = token::StellarAssetClient::new(&env, &token_id);
@@ -960,8 +1035,13 @@ fn test_initialize_invalid_treasury_share_above_max() {
     let treasury = Address::generate(&env);
     let token = Address::generate(&env);
 
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut pm = soroban_sdk::Vec::new(&env);
+    pm.push_back(admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id)
+        .initialize(&emergency_pause::types::AdminCouncil { members: pm, threshold: 1 });
     // treasury_share_bps = 10001 should fail
-    let result = client.try_initialize(&council, &50u32, &10001u32, &treasury, &token);
+    let result = client.try_initialize(&council, &50u32, &10001u32, &treasury, &token, &pause_id);
     assert_eq!(result, Err(Ok(ContractError::InvalidTreasuryShare)));
 }
 
@@ -1061,10 +1141,15 @@ fn test_set_treasury_address_success() {
         threshold: 1,
     };
 
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut pm = soroban_sdk::Vec::new(&env);
+    pm.push_back(admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id)
+        .initialize(&emergency_pause::types::AdminCouncil { members: pm, threshold: 1 });
     treasury::TreasuryContractClient::new(&env, &treasury_id_1)
-        .initialize(&treasury_council, &token_id);
+        .initialize(&treasury_council, &token_id, &pause_id);
     treasury::TreasuryContractClient::new(&env, &treasury_id_2)
-        .initialize(&treasury_council, &token_id);
+        .initialize(&treasury_council, &token_id, &pause_id);
 
     let contract_id = env.register(FeeDistributorContract, ());
     let client = FeeDistributorContractClient::new(&env, &contract_id);
@@ -1075,7 +1160,7 @@ fn test_set_treasury_address_success() {
     };
 
     // Initialize pointing at treasury_id_1
-    client.initialize(&council, &100u32, &5000u32, &treasury_id_1, &token_id);
+    client.initialize(&council, &100u32, &5000u32, &treasury_id_1, &token_id, &pause_id);
 
     let token_client = token::StellarAssetClient::new(&env, &token_id);
     token_client.mint(&contract_id, &1_000_000);
