@@ -29,8 +29,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, IntoVal, String,
-    Symbol,
+    contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, IntoVal, String, Symbol,
 };
 
 pub mod errors;

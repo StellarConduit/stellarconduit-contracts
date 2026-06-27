@@ -16,7 +16,10 @@ fn make_pause(env: &Env, admin: &Address) -> Address {
     let mut m = soroban_sdk::Vec::new(env);
     m.push_back(admin.clone());
     emergency_pause::EmergencyPauseContractClient::new(env, &pause_id).initialize(
-        &emergency_pause::types::AdminCouncil { members: m, threshold: 1 },
+        &emergency_pause::types::AdminCouncil {
+            members: m,
+            threshold: 1,
+        },
     );
     pause_id
 }
@@ -61,7 +64,7 @@ fn setup<'a>() -> (Env, DisputeResolverContractClient<'a>, Address, Address) {
         threshold: 1,
     };
     emergency_pause::EmergencyPauseContractClient::new(&env, &pause_id).initialize(&pause_council);
-   client.initialize(&council, &registry_id, &100u32, &pause_id); // 100 ledger resolution window
+    client.initialize(&council, &registry_id, &100u32, &pause_id); // 100 ledger resolution window
     (env, client, admin, registry_id)
 }
 
@@ -136,7 +139,7 @@ fn test_initialize_success() {
     let pause_id = make_pause(&env, &admin);
 
     let registry_id = env.register(MockRelayRegistryContract, ());
-   client.initialize(&council, &registry_id, &100u32, &pause_id);
+    client.initialize(&council, &registry_id, &100u32, &pause_id);
 
     let active_window = env.as_contract(&client.address, || storage::get_resolution_window(&env));
     assert_eq!(active_window, 100);
@@ -154,7 +157,7 @@ fn test_initialize_already_initialized() {
         threshold: 1,
     };
     let pause_id = make_pause(&env, &admin);
-   client.initialize(&council, &registry, &200u32, &pause_id);
+    client.initialize(&council, &registry, &200u32, &pause_id);
 }
 
 // ── raise_dispute() tests ─────────────────────────────────────────────────────

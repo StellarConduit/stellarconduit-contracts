@@ -47,7 +47,10 @@ fn test_initialize_twice_fails() {
     client.initialize(&council);
     let result = client.try_initialize(&council);
 
-    assert_eq!(result, Err(Ok(crate::errors::ContractError::AlreadyInitialized)));
+    assert_eq!(
+        result,
+        Err(Ok(crate::errors::ContractError::AlreadyInitialized))
+    );
 }
 
 #[test]
