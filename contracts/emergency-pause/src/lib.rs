@@ -102,10 +102,8 @@ impl EmergencyPauseContract {
         storage::set_paused(&env, false);
         storage::remove_pause_record(&env);
 
-        env.events().publish(
-            (Symbol::new(&env, "unpaused"),),
-            env.ledger().timestamp(),
-        );
+        env.events()
+            .publish((Symbol::new(&env, "unpaused"),), env.ledger().timestamp());
 
         Ok(())
     }

@@ -126,6 +126,7 @@ impl RelayRegistryContract {
     /// - `admin`: Address of the admin account authorized to slash nodes and update config.
     /// - `min_stake`: Minimum required stake amount. Must be greater than zero.
     /// - `stake_lock_period`: Number of ledgers a node must wait before unstaking. Must be greater than zero.
+    /// - `treasury_address`: Address of the treasury contract that receives slashed stake.
     ///
     /// # Errors
     /// - `ContractError::AlreadyInitialized` if the contract has already been initialized.
@@ -165,7 +166,7 @@ impl RelayRegistryContract {
         // Persist config
         storage::set_admin_council(&env, &council);
         storage::set_token_address(&env, &token_address);
-        let _ = treasury_address; // Stored in fee-distributor, accepted here for signature alignment
+        storage::set_treasury_address(&env, &treasury_address);
         storage::set_min_stake(&env, min_stake);
         storage::set_stake_lock_period(&env, stake_lock_period);
         storage::set_pause_contract_address(&env, &pause_contract_address);
@@ -443,7 +444,7 @@ impl RelayRegistryContract {
     /// # Errors
     /// - `ContractError::NotRegistered` if the node is not in the registry.
     /// - `ContractError::NodeSlashed` if the node is already slashed.
-    /// - (Auth) Soroban will automatically panic if the caller is not the `Admin`.
+    /// - `ContractError::NotInitialized` if the treasury address was not configured at initialization.
     pub fn slash(env: Env, node_address: Address, _reason: String) -> Result<(), ContractError> {
         storage::extend_instance_ttl(&env);
         require_council_auth(&env);
@@ -470,13 +471,20 @@ impl RelayRegistryContract {
             storage::remove_lock_entry(&env, &node_address);
         }
 
-        // Warning: Local treasury target stub needed. Normally handled in separate PR but stubbing here.
-        // Needs a valid storage variable or routing map to determine `treasury`
-        // Leaving // TODO: transfer slashed stake to treasury for now since issue specifies to replace // TODO: SAC transfer comments only
+        let treasury_address =
+            storage::get_treasury_address(&env).ok_or(ContractError::NotInitialized)?;
 
         storage::set_node(&env, &node_address, &node);
 
-        // Emit an event so the slashing reason is auditable on-chain.
+        if slashed_amount > 0 {
+            let token = token::Client::new(&env, &storage::get_token_address(&env));
+            token.transfer(
+                &env.current_contract_address(),
+                &treasury_address,
+                &slashed_amount,
+            );
+        }
+
         env.events().publish(
             (
                 soroban_sdk::Symbol::new(&env, "relay_registry"),
