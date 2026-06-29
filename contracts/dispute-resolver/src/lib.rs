@@ -28,7 +28,10 @@
 
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, String, Symbol};
+use soroban_sdk::{
+    contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, IntoVal, String,
+    Symbol,
+};
 
 pub mod errors;
 pub mod storage;
@@ -352,7 +355,8 @@ impl DisputeResolverContract {
     fn verify_proof(env: &Env, public_key: &BytesN<32>, proof: &RelayChainProof) -> bool {
         let message: Bytes = proof.chain_hash.clone().into();
         env.crypto()
-            .ed25519_verify(public_key, &message, &proof.signature)
+            .ed25519_verify(public_key, &message, &proof.signature);
+        true
     }
 
     fn require_active_node(env: &Env, node: &Address) -> Result<(), ContractError> {

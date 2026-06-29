@@ -50,5 +50,5 @@ pub enum ContractError {
     UnauthorizedRespondent = 16,
 
     /// Protocol is paused; operation is blocked until unpaused.
-    ProtocolPaused = 17,
+    ProtocolPaused = 18,
 }

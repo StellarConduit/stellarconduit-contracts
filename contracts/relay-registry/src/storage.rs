@@ -46,6 +46,7 @@ pub enum DataKey {
     StakeLockPeriod,
     AdminCouncil,
     TokenAddress,
+    TreasuryAddress,
     LockEntry(Address),
     PauseContractAddress,
 }
@@ -142,6 +143,16 @@ pub fn set_token_address(env: &Env, token_address: &Address) {
     env.storage()
         .instance()
         .set(&DataKey::TokenAddress, token_address);
+}
+
+pub fn get_treasury_address(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::TreasuryAddress)
+}
+
+pub fn set_treasury_address(env: &Env, address: &Address) {
+    env.storage()
+        .instance()
+        .set(&DataKey::TreasuryAddress, address);
 }
 
 pub fn get_lock_entry(env: &Env, address: &Address) -> Option<crate::types::StakeEntry> {

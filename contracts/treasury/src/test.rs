@@ -40,6 +40,15 @@ fn setup_council_and_token<'a>(
     let recipient = Address::generate(env);
     let (token_client, token_address) = create_token_contract(env, &admin);
     token_client.mint(&admin, &50000);
+    let pause_id = env.register(emergency_pause::EmergencyPauseContract, ());
+    let mut pause_members = soroban_sdk::Vec::new(env);
+    pause_members.push_back(admin.clone());
+    emergency_pause::EmergencyPauseContractClient::new(env, &pause_id).initialize(
+        &emergency_pause::types::AdminCouncil {
+            members: pause_members,
+            threshold: 1,
+        },
+    );
     env.as_contract(&client.address, || {
         let mut members = soroban_sdk::Vec::new(env);
         members.push_back(admin.clone());
@@ -49,6 +58,7 @@ fn setup_council_and_token<'a>(
         };
         storage::set_admin_council(env, &council);
         storage::set_token_address(env, &token_address);
+        storage::set_pause_contract_address(env, &pause_id);
     });
     (admin, recipient, token_address)
 }

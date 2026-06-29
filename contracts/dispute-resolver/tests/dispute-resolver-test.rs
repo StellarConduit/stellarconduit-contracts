@@ -215,45 +215,29 @@ fn test_raise_dispute_duplicate_tx_id() {
 #[test]
 #[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
 fn test_raise_dispute_auth_required() {
-    let env = Env::default();
-    env.mock_all_auths();
-    // Do not call mock_all_auths() for the client after setup
-    let contract_id = env.register(DisputeResolverContract, ());
-    let client = DisputeResolverContractClient::new(&env, &contract_id);
-
-    let admin = Address::generate(&env);
-    let mut members = soroban_sdk::Vec::new(&env);
-    members.push_back(admin.clone());
-    let council = AdminCouncil {
-        members,
-        threshold: 1,
-    };
-    let pause_id = make_pause(&env, &admin);
-    client.initialize(&council, &registry_id, &100u32, &pause_id);
-
-    // Re-create env without mock_all_auths so auth panics
     let env2 = Env::default();
+    let registry_id = env2.register(MockRelayRegistryContract, ());
     let contract_id2 = env2.register(DisputeResolverContract, ());
     let client2 = DisputeResolverContractClient::new(&env2, &contract_id2);
     let admin2 = Address::generate(&env2);
     let mut members2 = soroban_sdk::Vec::new(&env2);
     members2.push_back(admin2.clone());
-    let council2 = AdminCouncil { members: members2, threshold: 1 };
-    let pause_id2 = {
-        env2.mock_all_auths();
-        let pid = make_pause(&env2, &admin2);
-        // clear mock so next call has no auth
-        pid
+    let council2 = AdminCouncil {
+        members: members2,
+        threshold: 1,
     };
-    client2.initialize(&council2, &registry_id, &100u32, &pause_id2);
 
-   let (initiator, respondent, init_sk, _) = setup_disputants(&env2, &client2, &registry_id);
+    env2.mock_all_auths();
+    let pause_id2 = make_pause(&env2, &admin2);
+    client2.initialize(&council2, &registry_id, &100u32, &pause_id2);
+    env2.set_auths(&[]);
+
+    let (initiator, respondent, init_sk, _) = setup_disputants(&env2, &client2, &registry_id);
 
     let tx_id = BytesN::from_array(&env2, &[9u8; 32]);
     let chain_hash = [8u8; 32];
     let init_proof = create_proof(&env2, &init_sk, &chain_hash, 10);
 
-    // Will panic because require_auth() is not satisfied
     client2.raise_dispute(&initiator, &respondent, &tx_id, &init_proof);
 }
 
@@ -452,8 +436,9 @@ fn test_respond_unauthorized_respondent() {
     let (env, client, _, registry) = setup();
     let (initiator, respondent, init_sk, _) = setup_disputants(&env, &client, &registry);
 
-    // Create a third party
+    // Create a third party and mark them active so we hit UnauthorizedRespondent, not NodeNotActive
     let unauthorized = Address::generate(&env);
+    MockRelayRegistryContractClient::new(&env, &registry).set_active(&unauthorized, &true);
 
     let tx_id = BytesN::from_array(&env, &[9u8; 32]);
     let chain_hash = [8u8; 32];
